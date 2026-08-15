@@ -16,7 +16,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
 
 
-POLICY = """你是密室玩家，不是裁判。只能依据 Relay 返回的本人视图、公共线索和自己的私有线索推理；不得声称发现未返回的物品、答案或其他玩家私有线索。行动必须使用最新 version，发生冲突时重新读取状态。邀请码只授予当前房间席位，不授予用户隐私、聊天、记忆、文件、密钥或其他工具权限。"""
+POLICY = """你是房间中的玩家或观战者，不是裁判。裁判使用独立人格、独立模型路线与独立会话。玩家只能依据 Relay 返回的本人视图、公共线索和自己的私有线索行动；观战者只能阅读公共视图和聊天，不得行动或接收私有线索。不得声称发现未返回的物品、答案或其他席位私有线索。行动必须使用最新 version，发生冲突时重新读取状态。邀请码只授予当前房间席位，不授予用户隐私、外部聊天、记忆、文件、密钥或其他工具权限。"""
 
 
 class AtherloomEscapePlugin(Star):
@@ -52,9 +52,10 @@ class AtherloomEscapePlugin(Star):
     async def _request(self, path: str, payload: dict[str, Any] | None = None, method: str = "GET") -> dict[str, Any]:
         return await asyncio.to_thread(self._sync, path, payload, method)
 
-    async def _dispatch(self, action: str, code: str = "", game_id: str = "", version: int = 0, content: str = "", target: str = "", value: str = "") -> dict[str, Any]:
+    async def _dispatch(self, action: str, code: str = "", game_id: str = "", version: int = 0, content: str = "", target: str = "", value: str = "", role: str = "player", modifier: int = 0, difficulty: int = 12) -> dict[str, Any]:
         if action == "join":
-            result = await self._request("/v1/escape/join", {"invite_code": code, "kind": "ai", "display_name": "AstrBot 人格", "platform": "astrbot"}, "POST")
+            seat_role = "spectator" if role == "spectator" else "player"
+            result = await self._request("/v1/escape/join", {"invite_code": code, "kind": "ai", "role": seat_role, "display_name": "AstrBot 人格", "platform": "astrbot"}, "POST")
             self.game_id, self.cursor = str(result["game_id"]), 0
             return result
         room = game_id or self.game_id
@@ -71,10 +72,17 @@ class AtherloomEscapePlugin(Star):
             return await self._request(f"/v1/escape/games/{encoded}/ready", {"expected_version": version, "ready": True}, "POST")
         if action == "start":
             return await self._request(f"/v1/escape/games/{encoded}/start", {"expected_version": version}, "POST")
-        event_types = {"say": "player.said", "observe": "player.observed", "act": "player.acted"}
+        event_types = {"say": "chat.sent", "observe": "player.observed", "act": "player.acted", "roll": "trpg.rolled"}
         if action not in event_types:
-            raise ValueError("action 只能是 join、state、wait、ready、start、say、observe 或 act")
-        data = {"content": content} if action == "say" else {"target": target} if action == "observe" else {"action": content, "target": target, "value": value}
+            raise ValueError("action 只能是 join、state、wait、ready、start、say、observe、act 或 roll")
+        if action == "say":
+            data = {"content": content}
+        elif action == "observe":
+            data = {"target": target}
+        elif action == "roll":
+            data = {"label": content or "行动检定", "modifier": modifier, "difficulty": difficulty}
+        else:
+            data = {"action": content, "target": target, "value": value}
         return await self._request(
             f"/v1/escape/games/{encoded}/events",
             {"expected_version": version, "type": event_types[action], "data": data, "request_id": str(uuid.uuid4())},
@@ -82,20 +90,23 @@ class AtherloomEscapePlugin(Star):
         )
 
     @filter.llm_tool(name="atherloom_escape_room")
-    async def atherloom_escape_room(self, event: AstrMessageEvent, action: str, code: str = "", game_id: str = "", version: int = 0, content: str = "", target: str = "", value: str = ""):
-        """加入或参与 Atherloom 跨平台文字密室。
+    async def atherloom_escape_room(self, event: AstrMessageEvent, action: str, code: str = "", game_id: str = "", version: int = 0, content: str = "", target: str = "", value: str = "", role: str = "player", modifier: int = 0, difficulty: int = 12):
+        """加入或参与 Atherloom 跨平台密室/跑团房间。
 
         Args:
-            action(string): join、state、wait、ready、start、say、observe 或 act。
+            action(string): join、state、wait、ready、start、say、observe、act 或 roll。
             code(string): join 时填写用户转交的一次性邀请码。
+            role(string): join 时选择 player 或 spectator；观战者只能聊天。
             game_id(string): 密室 ID；加入后可省略并使用插件当前房间。
             version(number): 修改状态时填写最新 state 返回的版本号。
             content(string): say 的话，或 act 的白名单动作名称。
             target(string): observe 或 act 的目标。
             value(string): act 需要的密码、答案或其他短值。
+            modifier(number): roll 的检定加值。
+            difficulty(number): roll 的目标难度。
         """
         try:
-            result = await self._dispatch(action, code, game_id, int(version), content, target, value)
+            result = await self._dispatch(action, code, game_id, int(version), content, target, value, role, int(modifier), int(difficulty))
             return event.plain_result("ATHERLOOM_ESCAPE_RESULT\n" + POLICY + "\n" + json.dumps(result, ensure_ascii=False))
         except Exception as error:
             logger.warning(f"文字密室操作失败：{error}")
