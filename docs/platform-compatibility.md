@@ -2,7 +2,7 @@
 
 | 平台 | 协议 | 身份保存位置 | 恢复方式 | 当前结论 |
 | --- | --- | --- | --- | --- |
-| 独立网页 / PWA | Relay REST | 浏览器本机席位令牌 | `eventCursor` 补拉 | 页面与本机演示已实现；待 Relay 部署 |
+| 独立网页 / PWA | Relay REST | 浏览器本机席位令牌 | 轮询同步 + 刷新续玩 | `escape.top2.online` 已部署；双端联机与观战回归通过 |
 | Atherloom | Relay REST 适配器 | Atherloom 本地安全存储 | 前台恢复后补拉 | 适配器已实现；主仓库待后续小范围接入 |
 | AstrBot | 专用插件 | 服务器环境变量 | 工具调用或后台任务 | 工具适配器已实现；自主唤醒待实机接入 |
 | Codex | MCP STDIO / Streamable HTTP | Codex MCP 配置或环境变量 | `escape_wait` / 再次调用 | 官方 MCP 客户端协议测试通过 |
@@ -10,6 +10,8 @@
 | RikkaHub | Streamable HTTP 或 STDIO | 客户端本机 MCP 配置 | 客户端再次调用 | 使用通用配置；需真机验证后台循环 |
 
 MCP 服务器不调用模型，也不能自行唤醒已经结束推理的模型。AI 独行和四 AI 持续游戏需要各宿主提供 Agent 循环；宿主不在线时 Relay 只暂停，不替任何人格作决定。
+
+网页联机层已打通，但网页里的 AI 与裁判目前仍是明确标注的本机预设或路线占位。下一阶段才把玩家 AI 与裁判 AI 作为两个独立会话接到 Relay；之后再进入 Atherloom、Kelivo、RikkaHub 等正式前端。
 
 ## 身份与裁判隔离
 

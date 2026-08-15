@@ -11,6 +11,7 @@ import {
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
+let schemaReady = false;
 
 function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), { status, headers: { ...JSON_HEADERS, ...extraHeaders } });
@@ -74,6 +75,7 @@ function bearer(request) {
 }
 
 async function ensureSchema(db) {
+  if (schemaReady) return;
   await db.exec(`
 CREATE TABLE IF NOT EXISTS escape_games(id TEXT PRIMARY KEY,invite_hash TEXT NOT NULL UNIQUE,game_type TEXT NOT NULL DEFAULT 'escape',mode TEXT NOT NULL,world TEXT NOT NULL,tone TEXT NOT NULL,status TEXT NOT NULL,version INTEGER NOT NULL,state_json TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS escape_seats(id TEXT PRIMARY KEY,game_id TEXT NOT NULL,client_id TEXT,seat_token_hash TEXT,kind TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'player',display_name TEXT NOT NULL,platform TEXT NOT NULL,seat_no INTEGER NOT NULL,joined_at INTEGER NOT NULL,last_seen_at INTEGER NOT NULL,UNIQUE(game_id,client_id));
@@ -91,6 +93,7 @@ CREATE INDEX IF NOT EXISTS escape_audit_game ON escape_audit(game_id,created_at)
   if (!seatColumns.results?.some((column) => column.name === "role")) {
     await db.prepare("ALTER TABLE escape_seats ADD COLUMN role TEXT NOT NULL DEFAULT 'player'").run();
   }
+  schemaReady = true;
 }
 
 async function findClient(db, rawToken) {
@@ -134,7 +137,7 @@ function errorResponse(error, headers) {
     invalid_json: 400, body_too_large: 413, unauthorized: 401, forbidden_origin: 403,
     game_not_found: 404, invite_not_found: 404, seat_not_found: 404,
     room_full: 409, player_slots_full: 409, version_conflict: 409, game_already_started: 409,
-    not_enough_players: 409, players_not_ready: 409, not_your_turn: 409,
+    not_enough_players: 409, players_not_ready: 409, game_not_active: 409, not_your_turn: 409,
     spectator_cannot_act: 403, private_clue_requires_player: 422,
     invalid_creator: 422, invalid_seat: 422, unknown_game_type: 422, unknown_mode: 422, event_not_allowed: 422
   };
@@ -142,7 +145,7 @@ function errorResponse(error, headers) {
     invalid_json: "请求不是有效的 JSON", body_too_large: "请求内容过大", unauthorized: "没有有效的席位身份",
     forbidden_origin: "当前网页来源不在允许列表", game_not_found: "密室不存在", invite_not_found: "邀请码无效或已失效",
     room_full: "席位已经坐满", player_slots_full: "玩家席已经坐满，只能加入观战席", version_conflict: "局面刚刚发生变化，请刷新后重试", game_already_started: "游戏已经开始",
-    not_enough_players: "入席人数还不够", players_not_ready: "还有玩家没有准备", not_your_turn: "现在轮到另一位玩家",
+    not_enough_players: "入席人数还不够", players_not_ready: "还有玩家没有准备", game_not_active: "游戏还没有正式开始", not_your_turn: "现在轮到另一位玩家",
     spectator_cannot_act: "观战席不能执行玩家动作", private_clue_requires_player: "私有线索只能交给玩家席",
     invalid_creator: "创建者信息不完整", invalid_seat: "席位信息不完整", unknown_game_type: "未知的玩法", unknown_mode: "未知的参与模式",
     event_not_allowed: "这种事件不能由玩家直接提交"
@@ -231,6 +234,9 @@ async function handle(request, env) {
 
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, headers);
   const body = await readBody(request);
+  if ((action === "ready" || action === "start") && state.status === "active") {
+    return json(viewForSeat(state, seat.id, 0), 200, headers);
+  }
   assertVersion(state, body.expected_version);
   const expectedVersion = state.version;
   if (action === "ready") setSeatReady(state, seat.id, body.ready !== false);
@@ -238,6 +244,14 @@ async function handle(request, env) {
   else if (action === "events") {
     const type = cleanText(body.type, 30);
     let data = body.data && typeof body.data === "object" ? body.data : {};
+    if (state.status === "lobby") {
+      const mode = MODES[state.mode];
+      const players = state.seats.filter((item) => item.role !== "spectator");
+      const canStart = state.seats.length >= mode.minSeats
+        && players.length >= (mode.minPlayers || mode.minSeats)
+        && state.seats.every((item) => item.ready);
+      if (canStart) startGame(state, seat.id);
+    }
     if (type === "trpg.rolled") {
       const modifier = Math.max(-10, Math.min(20, Number(data.modifier) || 0));
       const difficulty = Math.max(1, Math.min(40, Number(data.difficulty) || 12));

@@ -36,7 +36,7 @@
         <span><strong>心织密室</strong><small>Atherloom Escape</small></span>
       </a>
       <div class="site-header__status">
-        <span class="sync-dot" aria-hidden="true"></span>
+        <span class="sync-dot" id="syncDot" aria-hidden="true"></span>
         <span id="globalStatus">本机档案已就绪</span>
       </div>
     </header>
@@ -60,6 +60,20 @@
             <span>建立新现场</span>
             <small>ARCHIVE NO. <b id="archiveNumber">----</b></small>
           </header>
+
+          <fieldset class="connection-fieldset">
+            <legend>档案保存在哪里</legend>
+            <label class="connection-option connection-option--online">
+              <input type="radio" name="connection" value="online" checked>
+              <span><b>联机房间</b><small>邀请码跨设备同步 · Relay 实时存档</small></span>
+              <em>LIVE</em>
+            </label>
+            <label class="connection-option">
+              <input type="radio" name="connection" value="local">
+              <span><b>本机演示</b><small>无需网络 · 预设 AI · 只存此浏览器</small></span>
+              <em>DEMO</em>
+            </label>
+          </fieldset>
 
           <fieldset class="game-type-fieldset">
             <legend>选择玩法</legend>
@@ -132,7 +146,7 @@
             <span class="stamp stamp--tone" id="tonePreview">气质待抽取</span>
           </div>
 
-          <button class="button button--primary button--wide" type="submit">抽取并建立房间</button>
+          <button class="button button--primary button--wide" id="createRoom" type="submit">抽取并建立联机房间</button>
           <button class="button button--quiet button--wide resume-button" id="resumeGame" type="button" hidden>继续上次现场</button>
           <button class="text-action" id="showJoin" type="button">我有邀请码</button>
         </form>
@@ -142,8 +156,12 @@
           <p class="archive-kicker">JOIN EXISTING CASE</p>
           <h2>加入一间已经亮灯的房间</h2>
           <label class="text-field"><span>一次性邀请码</span><input id="inviteCode" maxlength="16" placeholder="例如 A7K4-M2P9" autocomplete="off"></label>
-          <p class="form-note">Relay 尚未部署时，邀请码入口只验证格式，不会伪造联机成功。</p>
-          <button class="button button--primary" type="submit">验证邀请码</button>
+          <div class="join-identity-grid">
+            <label class="text-field"><span>入席署名</span><input id="joinDisplayName" maxlength="24" value="枔枔" autocomplete="nickname"></label>
+            <label class="text-field"><span>入席身份</span><select id="joinRole"><option value="player">玩家席</option><option value="spectator">观战席</option></select></label>
+          </div>
+          <p class="form-note">加入后会自动准备；人齐时由 Relay 开场。观战席可聊天，但不能行动或查看玩家私有线索。</p>
+          <button class="button button--primary" id="joinRoom" type="submit">加入联机房间</button>
         </form>
 
         <div class="plan-ghost" aria-hidden="true">
@@ -255,7 +273,7 @@
             </div>
             <details class="archive-facts">
               <summary>存档事实</summary>
-              <dl><div><dt>状态版本</dt><dd id="stateVersion">1</dd></div><div><dt>事件游标</dt><dd id="eventCursor">1</dd></div><div><dt>保存位置</dt><dd>本机演示</dd></div></dl>
+              <dl><div><dt>状态版本</dt><dd id="stateVersion">1</dd></div><div><dt>事件游标</dt><dd id="eventCursor">1</dd></div><div><dt>保存位置</dt><dd id="saveLocation">本机演示</dd></div></dl>
             </details>
           </aside>
         </div>

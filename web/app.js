@@ -9,8 +9,10 @@ import {
   startGame,
   viewForSeat
 } from "../shared/escape-core.mjs";
+import { EscapeRelayClient, RelayError, RELAY_URL } from "./relay-client.js";
 
 const STORAGE_KEY = "atherloom:escape:local-game:v1";
+const ONLINE_KEY = "atherloom:escape:online-session:v1";
 const ADULT_KEY = "atherloom:escape:adult-confirmed:v1";
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -26,8 +28,17 @@ const CHARACTER_ROLES = {
 };
 
 let state = loadState();
+let onlineSession = loadOnlineSession();
+const relayOverride = ["127.0.0.1", "localhost"].includes(location.hostname)
+  ? new URLSearchParams(location.search).get("relay") || onlineSession?.relayUrl
+  : "";
+const relay = new EscapeRelayClient({ baseUrl: relayOverride || RELAY_URL });
+let runtimeMode = "local";
 let activeSeatId = state?.activeSeatId || state?.seats?.[0]?.id || null;
 let toastTimer = null;
+let pollTimer = null;
+let relayQueue = Promise.resolve();
+let relayPending = 0;
 
 function normalizeState(candidate) {
   if (!candidate) return null;
@@ -52,10 +63,39 @@ function loadState() {
   try { return normalizeState(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null")); } catch { return null; }
 }
 
+function loadOnlineSession() {
+  try {
+    const session = JSON.parse(localStorage.getItem(ONLINE_KEY) || "null");
+    return session?.gameId && session?.seatToken ? session : null;
+  } catch { return null; }
+}
+
+function isOnline() { return runtimeMode === "online"; }
+
+function setConnectionStatus(message, status = "local") {
+  $("#globalStatus").textContent = message;
+  $("#syncDot").dataset.state = status;
+}
+
+function hydrateOnlineState(view) {
+  state = normalizeState({
+    ...view,
+    inviteCode: onlineSession?.inviteCode || "",
+    connectionKind: "online"
+  });
+  activeSeatId = view.selfSeatId || onlineSession?.seatId || activeSeatId;
+  return state;
+}
+
+function saveOnlineSession(session) {
+  onlineSession = { relayUrl: relay.baseUrl, ...session };
+  localStorage.setItem(ONLINE_KEY, JSON.stringify(onlineSession));
+}
+
 function saveState(message = "本机即时存档完成") {
   state.activeSeatId = activeSeatId;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  $("#globalStatus").textContent = message;
+  setConnectionStatus(message, "local");
 }
 
 function toast(message) {
@@ -110,12 +150,23 @@ function applyTheme(view) {
 }
 
 function renderLanding() {
+  stopPolling();
   $("#landingView").hidden = false;
   $("#roomView").hidden = true;
   $("#archiveNumber").textContent = archiveNumber();
   $("#worldPreview").textContent = "世界待抽取";
   $("#tonePreview").textContent = "气质待抽取";
-  $("#resumeGame").hidden = !state;
+  updateConnectionChoice();
+}
+
+function updateConnectionChoice() {
+  const choice = formValue("connection", "online");
+  const online = choice === "online";
+  $("#createRoom").textContent = online ? "抽取并建立联机房间" : "抽取并建立本机演示";
+  $("#resumeGame").hidden = online ? !onlineSession : !loadState();
+  $("#resumeGame").textContent = online ? "回到上次联机现场" : "继续本机演示现场";
+  if ($("#landingView").hidden) return;
+  setConnectionStatus(online ? (onlineSession ? "找到一份联机席位凭证" : "联机 Relay 待连接") : (loadState() ? "找到一份本机即时存档" : "本机演示已就绪"), online ? "connecting" : "local");
 }
 
 function renderChat(view) {
@@ -149,7 +200,7 @@ function renderEvidence(view) {
 
 function renderRoom() {
   if (!state || !activeSeatId) return renderLanding();
-  const view = viewForSeat(state, activeSeatId);
+  const view = isOnline() ? state : viewForSeat(state, activeSeatId);
   applyTheme(view);
   $("#landingView").hidden = true;
   $("#roomView").hidden = false;
@@ -163,6 +214,7 @@ function renderRoom() {
   $("#roundNumber").textContent = view.round;
   $("#stateVersion").textContent = view.version;
   $("#eventCursor").textContent = view.eventCursor;
+  $("#saveLocation").textContent = isOnline() ? "Relay 联机存档" : "本机演示";
   $("#mapProgress").textContent = `${Math.min(18 + view.clues.length * 14, 94)}%`;
   $("#refereeDisplayName").textContent = view.referee.displayName;
   $("#refereeRouteLabel").textContent = `${view.referee.routeLabel} · ${view.referee.platform}`;
@@ -200,7 +252,13 @@ function renderRoom() {
   const timeline = view.events.filter((event) => !["chat.sent", "player.said"].includes(event.type));
   $("#eventStream").innerHTML = timeline.slice(-10).reverse().map((event) => `<div class="event-entry" data-seq="${event.seq}">${friendlyEvent(event)}</div>`).join("");
   renderEvidence(view);
-  if (self?.role === "spectator") $("#globalStatus").textContent = "观战席：可聊天，不接收行动轮次或私有线索";
+  if (isOnline()) {
+    const message = self?.role === "spectator" ? "Relay 已同步 · 观战席可聊天" : view.status === "lobby" ? "Relay 已同步 · 等待其他席位入场" : view.actionRequired === "act" ? "Relay 已同步 · 轮到你行动" : "Relay 已同步 · 等待其他玩家行动";
+    setConnectionStatus(message, "online");
+    startPolling();
+  } else if (self?.role === "spectator") {
+    setConnectionStatus("观战席：可聊天，不接收行动轮次或私有线索", "local");
+  }
 }
 
 function prepareLocalCompanion(personaName) {
@@ -239,14 +297,170 @@ function sendDemoChatReply() {
   recordPlayerEvent(state, { seatId: demo.id, type: "chat.sent", requestId: crypto.randomUUID(), data: { content: roleText, demo: true } });
 }
 
-$("#createForm").addEventListener("submit", (event) => {
+const RELAY_MESSAGES = {
+  invite_not_found: "邀请码不存在或已经失效",
+  room_full: "房间已经坐满了",
+  player_slots_full: "玩家席已经满了，可以改选观战席",
+  game_already_started: "这局已经开场，不能再加入",
+  unauthorized: "这份联机席位凭证已经失效",
+  version_conflict: "现场刚被另一位参与者更新，正在重新同步",
+  not_enough_players: "还要等其他席位入场",
+  players_not_ready: "还有席位没有准备好",
+  not_your_turn: "现在轮到另一位玩家",
+  spectator_cannot_act: "观战席不能行动，但可以继续聊天",
+  game_not_active: "房间还没有正式开场"
+};
+
+function relayMessage(error) {
+  return RELAY_MESSAGES[error?.code] || error?.message || "联机服务暂时无法完成这一步";
+}
+
+function stopPolling() {
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+function startPolling() {
+  if (!isOnline() || pollTimer) return;
+  pollTimer = setInterval(() => {
+    if (!document.hidden && isOnline() && relayPending === 0) refreshOnline(true).catch(() => {});
+  }, 2200);
+}
+
+function queueRelay(task) {
+  relayPending += 1;
+  const run = relayQueue.catch(() => {}).then(task);
+  const settled = run.finally(() => { relayPending -= 1; });
+  relayQueue = settled.catch(() => {});
+  return settled;
+}
+
+function refreshOnline(silent = false) {
+  if (!onlineSession || (silent && relayPending > 0)) return Promise.resolve(state);
+  return queueRelay(async () => {
+    try {
+      const view = await relay.getState(onlineSession.gameId, onlineSession.seatToken);
+      const changed = !state || view.version !== state.version;
+      hydrateOnlineState(view);
+      if (changed || !silent) renderRoom();
+      else setConnectionStatus("Relay 已同步 · 没有遗漏新记录", "online");
+      return state;
+    } catch (error) {
+      setConnectionStatus(relayMessage(error), "error");
+      if (!silent) toast(relayMessage(error));
+      throw error;
+    }
+  });
+}
+
+function mutateOnline(operation, maxConflicts = 4) {
+  if (!onlineSession) return Promise.reject(new RelayError("unauthorized", RELAY_MESSAGES.unauthorized, 401));
+  return queueRelay(async () => {
+    setConnectionStatus("正在把这一步写入 Relay…", "connecting");
+    for (let attempt = 0; attempt <= maxConflicts; attempt += 1) {
+      try {
+        const view = await operation(state.version);
+        hydrateOnlineState(view);
+        renderRoom();
+        return state;
+      } catch (error) {
+        if (error?.code !== "version_conflict" || attempt === maxConflicts) {
+          setConnectionStatus(relayMessage(error), "error");
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 180 * (attempt + 1)));
+        hydrateOnlineState(await relay.getState(onlineSession.gameId, onlineSession.seatToken));
+      }
+    }
+    return state;
+  });
+}
+
+async function readyAndStartOnline() {
+  await mutateOnline((version) => relay.setReady(onlineSession.gameId, onlineSession.seatToken, version, true));
+  const mode = MODES[state.mode];
+  const players = state.seats.filter((seat) => seat.role !== "spectator");
+  const canStart = state.seats.length >= mode.minSeats
+    && players.length >= (mode.minPlayers || mode.minSeats)
+    && state.seats.every((seat) => seat.ready);
+  if (!canStart) {
+    setConnectionStatus("Relay 已同步 · 等待其他席位入场", "online");
+    return;
+  }
+  await mutateOnline((version) => relay.startGame(onlineSession.gameId, onlineSession.seatToken, version));
+}
+
+async function createOnlineGame({ mode, gameType, displayName, refereeName, routeLabel }) {
+  runtimeMode = "online";
+  stopPolling();
+  setConnectionStatus("正在建立 Relay 房间…", "connecting");
+  const role = mode === "ai_play_human_watch" ? "spectator" : "player";
+  const response = await relay.createGame({
+    game_type: gameType,
+    mode,
+    kind: "human",
+    role,
+    display_name: displayName,
+    platform: "web",
+    referee: {
+      display_name: refereeName,
+      route_label: routeLabel,
+      platform: routeLabel === "本机规则演示" ? "relay-rules" : "route-reserved"
+    }
+  });
+  saveOnlineSession({
+    gameId: response.game_id,
+    seatId: response.seat_id,
+    seatToken: response.seat_token,
+    inviteCode: response.invite_code
+  });
+  activeSeatId = response.seat_id;
+  await refreshOnline(true);
+  await readyAndStartOnline();
+  renderRoom();
+  toast(`联机房间已建立：${response.theme.world} × ${response.theme.tone}`);
+}
+
+async function joinOnlineGame(code, displayName, role) {
+  runtimeMode = "online";
+  stopPolling();
+  setConnectionStatus("正在验证邀请码并领取席位…", "connecting");
+  const response = await relay.joinGame({
+    invite_code: code,
+    kind: "human",
+    role,
+    display_name: displayName,
+    platform: "web"
+  });
+  saveOnlineSession({
+    gameId: response.game_id,
+    seatId: response.seat_id,
+    seatToken: response.seat_token,
+    inviteCode: code.replaceAll("-", "").replace(/(.{4})/, "$1-")
+  });
+  activeSeatId = response.seat_id;
+  await refreshOnline(true);
+  await readyAndStartOnline();
+  renderRoom();
+  toast(role === "spectator" ? "已进入观战席" : "已进入玩家席");
+}
+
+$("#createForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const button = $("#createRoom");
   const mode = currentMode();
   const gameType = currentGameType();
   const displayName = $("#displayName").value.trim() || "玩家";
   const personaName = $("#playerPersonaName").value.trim() || "本机演示人格";
   const refereeName = $("#refereeName").value.trim() || "规则裁判";
   const routeLabel = $("#refereeRoute").value;
+  button.disabled = true;
+  try {
+    if (formValue("connection", "online") === "online") {
+      await createOnlineGame({ mode, gameType, displayName, refereeName, routeLabel });
+      return;
+    }
+    runtimeMode = "local";
   const creatorIsAi = mode === "ai_solo" || mode === "ai_party";
   const creator = {
     id: makeId("seat"),
@@ -273,12 +487,27 @@ $("#createForm").addEventListener("submit", (event) => {
   $("#tonePreview").textContent = state.theme.tone;
   renderRoom();
   toast(`抽中：${state.theme.world} × ${state.theme.tone}`);
+  } catch (error) {
+    toast(relayMessage(error));
+    setConnectionStatus(relayMessage(error), "error");
+  } finally {
+    button.disabled = false;
+  }
 });
 
-$("#observeAction").addEventListener("click", () => {
+$("#observeAction").addEventListener("click", async () => {
   const target = $("#actionInput").value.trim();
   if (!target) return toast(state.gameType === "trpg" ? "先写下角色准备采取的行动" : "先写下你想观察的地方或物品");
   try {
+    if (isOnline()) {
+      const type = state.gameType === "trpg" ? "player.acted" : "player.observed";
+      const data = state.gameType === "trpg" ? { action: "roleplay", target } : { target };
+      const requestId = crypto.randomUUID();
+      await mutateOnline((version) => relay.sendEvent(onlineSession.gameId, onlineSession.seatToken, version, type, data, requestId));
+      $("#actionInput").value = "";
+      toast(state.gameType === "trpg" ? "行动已写入 Relay，等待独立裁判路线" : "观察已写入 Relay，并轮到下一位玩家");
+      return;
+    }
     if (state.gameType === "trpg") {
       recordPlayerEvent(state, { seatId: activeSeatId, type: "player.acted", requestId: crypto.randomUUID(), data: { action: "roleplay", target } });
     } else {
@@ -298,12 +527,19 @@ $("#observeAction").addEventListener("click", () => {
     toast(state.gameType === "trpg" ? "行动已交给独立裁判记录" : "观察结果已写入存档");
   } catch (error) {
     const messages = { not_your_turn: "现在轮到另一位玩家", spectator_cannot_act: "观战席不能执行动作，但仍可在无线电聊天" };
-    toast(messages[error.message] || "这一步暂时不能执行");
+    toast(isOnline() ? relayMessage(error) : (messages[error.message] || "这一步暂时不能执行"));
   }
 });
 
-$("#rollD20").addEventListener("click", () => {
+$("#rollD20").addEventListener("click", async () => {
   try {
+    if (isOnline()) {
+      const requestId = crypto.randomUUID();
+      await mutateOnline((version) => relay.sendEvent(onlineSession.gameId, onlineSession.seatToken, version, "trpg.rolled", { difficulty: 12, label: "行动检定" }, requestId));
+      const lastRoll = [...state.events].reverse().find((event) => event.type === "trpg.rolled");
+      toast(`Relay d20：${lastRoll?.data.roll || "—"}${lastRoll?.data.success ? " · 通过" : " · 未通过"}`);
+      return;
+    }
     const roll = crypto.getRandomValues(new Uint32Array(1))[0] % 20 + 1;
     recordPlayerEvent(state, { seatId: activeSeatId, type: "trpg.rolled", requestId: crypto.randomUUID(), data: { roll, difficulty: 12, success: roll >= 12 } });
     takeDemoTurn();
@@ -311,28 +547,48 @@ $("#rollD20").addEventListener("click", () => {
     renderRoom();
     toast(`d20 掷出 ${roll}：${roll >= 12 ? "检定通过" : "未通过"}`);
   } catch (error) {
-    toast(error.message === "spectator_cannot_act" ? "观战席不能代替玩家掷骰" : "当前还不能进行检定");
+    toast(isOnline() ? relayMessage(error) : (error.message === "spectator_cannot_act" ? "观战席不能代替玩家掷骰" : "当前还不能进行检定"));
   }
 });
 
-$("#chatForm").addEventListener("submit", (event) => {
+$("#chatForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const content = $("#chatInput").value.trim();
   if (!content) return toast("先写下要发送的话");
-  recordPlayerEvent(state, { seatId: activeSeatId, type: "chat.sent", requestId: crypto.randomUUID(), data: { content } });
-  $("#chatInput").value = "";
-  sendDemoChatReply();
-  saveState();
-  renderRoom();
+  try {
+    if (isOnline()) {
+      const requestId = crypto.randomUUID();
+      await mutateOnline((version) => relay.sendEvent(onlineSession.gameId, onlineSession.seatToken, version, "chat.sent", { content }, requestId));
+      $("#chatInput").value = "";
+      return;
+    }
+    recordPlayerEvent(state, { seatId: activeSeatId, type: "chat.sent", requestId: crypto.randomUUID(), data: { content } });
+    $("#chatInput").value = "";
+    sendDemoChatReply();
+    saveState();
+    renderRoom();
+  } catch (error) {
+    toast(isOnline() ? relayMessage(error) : "这句话暂时无法发送");
+  }
 });
 
 $("#showJoin").addEventListener("click", () => { $("#joinForm").hidden = false; $("#inviteCode").focus(); });
 $("#hideJoin").addEventListener("click", () => { $("#joinForm").hidden = true; });
-$("#joinForm").addEventListener("submit", (event) => {
+$("#joinForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const code = $("#inviteCode").value.trim().toUpperCase();
   if (!/^[A-Z2-9]{4}-?[A-Z2-9]{4}$/.test(code)) return toast("邀请码格式不正确");
-  toast("Relay 尚未部署，没有伪造入席；邀请码已通过格式检查");
+  const button = $("#joinRoom");
+  button.disabled = true;
+  try {
+    await joinOnlineGame(code, $("#joinDisplayName").value.trim() || "访客", $("#joinRole").value);
+    $("#joinForm").hidden = true;
+  } catch (error) {
+    toast(relayMessage(error));
+    setConnectionStatus(relayMessage(error), "error");
+  } finally {
+    button.disabled = false;
+  }
 });
 
 $("#copyInvite").addEventListener("click", async () => {
@@ -341,8 +597,22 @@ $("#copyInvite").addEventListener("click", async () => {
 });
 
 $("#backHome").addEventListener("click", renderLanding);
-$("#resumeGame").addEventListener("click", renderRoom);
+$("#resumeGame").addEventListener("click", async () => {
+  if (formValue("connection", "online") === "online") {
+    if (!onlineSession) return toast("没有找到可恢复的联机席位");
+    runtimeMode = "online";
+    setConnectionStatus("正在恢复上次联机现场…", "connecting");
+    try { await refreshOnline(false); } catch { /* 状态与提示已由 refreshOnline 更新 */ }
+    return;
+  }
+  runtimeMode = "local";
+  state = loadState();
+  activeSeatId = state?.activeSeatId || state?.seats?.[0]?.id || null;
+  renderRoom();
+});
 $(".brand").addEventListener("click", (event) => { event.preventDefault(); renderLanding(); });
+$$('input[name="connection"]').forEach((input) => input.addEventListener("change", updateConnectionChoice));
+$("#displayName").addEventListener("input", () => { if (!$("#joinDisplayName").value.trim()) $("#joinDisplayName").value = $("#displayName").value; });
 $$('.mobile-tabs button').forEach((button) => button.addEventListener("click", () => {
   $$('.mobile-tabs button').forEach((item) => item.classList.toggle("active", item === button));
   $$('[data-mobile-panel]').forEach((panel) => panel.classList.toggle("mobile-active", panel.dataset.mobilePanel === button.dataset.panel));
@@ -360,8 +630,11 @@ $("#declineAdult").addEventListener("click", () => {
 
 if (!sessionStorage.getItem(ADULT_KEY)) $("#ageGate").hidden = false;
 $("#archiveNumber").textContent = archiveNumber();
-if (state) $("#globalStatus").textContent = "找到一份本机即时存档";
 renderLanding();
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && isOnline() && !$("#roomView").hidden) refreshOnline(true).catch(() => {});
+});
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));
