@@ -1,0 +1,12 @@
+name = "atherloom-escape-relay"
+main = "src/index.js"
+compatibility_date = "2026-08-15"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "atherloom-relay"
+database_id = "replace-with-existing-d1-database-id"
+migrations_dir = "migrations"
+
+[vars]
+ALLOWED_ORIGINS = "https://yussica1026.github.io,http://127.0.0.1:8794,http://localhost:8794"

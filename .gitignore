@@ -1,0 +1,11 @@
+node_modules/
+mcp/dist/
+__pycache__/
+*.pyc
+.wrangler/
+.dev.vars
+.env
+coverage/
+site/
+test-artifacts/
+*.log

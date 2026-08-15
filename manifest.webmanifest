@@ -1,0 +1,13 @@
+{
+  "name": "心织密室 · Atherloom Escape",
+  "short_name": "心织密室",
+  "description": "跨平台 AI 协作文字密室",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#dce7e8",
+  "theme_color": "#dce7e8",
+  "icons": [
+    {"src":"web/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}

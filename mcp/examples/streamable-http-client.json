@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "atherloom-escape": {
+      "type": "streamable-http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": { "Authorization": "Bearer replace_with_mcp_access_token" }
+    }
+  }
+}
