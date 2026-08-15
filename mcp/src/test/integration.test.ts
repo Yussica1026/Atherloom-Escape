@@ -28,8 +28,9 @@ test("STDIO：官方 MCP 客户端发现工具并完成建局、准备、观察"
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 9);
+    assert.equal(tools.tools.length, 10);
     assert.ok(tools.tools.some(tool => tool.name === "atherloom_escape_wait"));
+    assert.ok(tools.tools.some(tool => tool.name === "atherloom_escape_roll"));
     const created = structured(await client.callTool({ name: "atherloom_escape_create", arguments: { mode: "ai_solo", display_name: "阿栈" } }));
     assert.equal(created.invite_code, "ABCD-2345");
     const state = structured(await client.callTool({ name: "atherloom_escape_state", arguments: { game_id: "escape_mock", after: 0 } }));

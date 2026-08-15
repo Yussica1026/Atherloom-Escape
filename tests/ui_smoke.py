@@ -5,61 +5,110 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "test-artifacts"
 ARTIFACTS.mkdir(exist_ok=True)
+URL = "http://127.0.0.1:8794"
 
 
-def run_mobile(browser):
-    context = browser.new_context(viewport={"width": 390, "height": 844})
+def page_with_errors(context):
     page = context.new_page()
     errors = []
     page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
     page.on("pageerror", lambda error: errors.append(str(error)))
-    page.goto("http://127.0.0.1:8794", wait_until="networkidle")
+    page.goto(URL, wait_until="networkidle")
     page.locator("#ageGate").wait_for(state="visible")
-    page.get_by_role("button", name="我已满 18 岁").click()
-    page.locator("#landingView").wait_for(state="visible")
-    assert page.get_by_text("有些出口").is_visible()
-    page.get_by_role("button", name="抽取并建立房间").click()
-    page.locator("#roomView").wait_for(state="visible")
-    assert page.locator("#roomWorld").inner_text() in ["古代", "现代", "科幻", "近现代", "中世纪", "西幻"]
-    assert page.locator("#roomTone").inner_text() in ["甜宠", "日常", "正剧", "BE", "恐怖"]
-    assert "demo（非真实 AI）" in page.locator("#seatList").inner_text()
-    page.locator("#actionInput").fill("停摆的钟")
-    page.get_by_role("button", name="观察现场").click()
-    page.get_by_role("button", name="线索").click()
-    assert page.locator(".evidence-card").count() == 1
-    assert "停在 02:17 的钟" in page.locator(".evidence-card").inner_text()
-    assert page.evaluate("Boolean(localStorage.getItem('atherloom:escape:local-game:v1'))")
-    page.screenshot(path=str(ARTIFACTS / "mobile-room.png"), full_page=True)
-    page.reload(wait_until="networkidle")
-    page.get_by_role("button", name="继续上次现场").click()
-    assert page.locator("#roomView").is_visible()
-    assert page.locator(".evidence-card").count() == 1
-    assert not errors, errors
-    context.close()
+    page.locator("#confirmAdult").click()
+    return page, errors
 
 
-def run_desktop(browser):
-    context = browser.new_context(viewport={"width": 1440, "height": 900})
-    page = context.new_page()
-    errors = []
-    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
-    page.on("pageerror", lambda error: errors.append(str(error)))
-    page.goto("http://127.0.0.1:8794", wait_until="networkidle")
-    page.get_by_role("button", name="我已满 18 岁").click()
-    assert page.locator(".case-cover").is_visible()
-    page.screenshot(path=str(ARTIFACTS / "desktop-landing.png"), full_page=True)
-    assert not errors, errors
-    context.close()
-
-
-def run_minor_gate(browser):
+def test_human_player_ai_spectator(browser):
     context = browser.new_context(viewport={"width": 390, "height": 844})
-    page = context.new_page()
-    page.goto("http://127.0.0.1:8794", wait_until="networkidle")
-    page.get_by_role("button", name="离开").click()
+    page, errors = page_with_errors(context)
+    page.locator('input[name="mode"][value="human_play_ai_watch"]').check(force=True)
+    page.locator("#playerPersonaName").fill("沈砚清")
+    page.locator("#refereeName").fill("雾中裁判")
+    page.locator("#refereeRoute").select_option(label="Atherloom 独立路线（待接入）")
+    page.locator("#createForm button[type=submit]").click()
+    page.locator("#roomView").wait_for(state="visible")
+    assert "雾中裁判" in page.locator("#refereeDisplayName").inner_text()
+    assert "未连接" in page.locator("#refereeRouteLabel").inner_text()
+    assert "雾中裁判" not in page.locator("#seatList").inner_text()
+    assert page.locator(".seat--spectator").count() == 1
+    assert "沈砚清" in page.locator(".seat--spectator").inner_text()
+    assert page.locator("#observeAction").is_enabled()
+    page.locator("#chatInput").fill("你在观战席看见什么？")
+    page.locator("#chatForm button[type=submit]").click()
+    assert page.locator(".chat-line").count() == 2
+    assert page.locator(".chat-line--demo").count() == 1
+    page.locator("#actionInput").fill("查看停摆的钟")
+    page.locator("#observeAction").click()
+    page.locator('button[data-panel="evidence"]').click()
+    assert page.locator(".evidence-card").count() == 1
+    assert page.evaluate("Boolean(localStorage.getItem('atherloom:escape:local-game:v1'))")
+    assert page.evaluate("document.documentElement.dataset.world.length > 0")
+    page.screenshot(path=str(ARTIFACTS / "mobile-watch-chat.png"), full_page=True)
+    page.reload(wait_until="networkidle")
+    page.locator("#resumeGame").click()
+    assert page.locator(".chat-line").count() == 2
+    assert not errors, errors
+    context.close()
+
+
+def test_ai_player_human_spectator_trpg(browser):
+    context = browser.new_context(viewport={"width": 390, "height": 844})
+    page, errors = page_with_errors(context)
+    page.locator('input[name="gameType"][value="trpg"]').check(force=True)
+    page.locator('input[name="mode"][value="ai_play_human_watch"]').check(force=True)
+    page.locator("#playerPersonaName").fill("沈砚清")
+    page.locator("#refereeName").fill("夜航主持")
+    page.locator("#createForm button[type=submit]").click()
+    page.locator("#trpgDesk").wait_for(state="visible")
+    assert page.locator("#roomPlan").is_hidden()
+    assert page.locator("#observeAction").is_disabled()
+    assert page.locator("#rollD20").is_disabled()
+    assert "观战席" in page.locator("#seatList").inner_text()
+    assert "沈砚清" in page.locator("#characterName").inner_text()
+    assert page.locator("#diceResult").inner_text() != "—"
+    assert "夜航主持" not in page.locator("#seatList").inner_text()
+    page.locator("#chatInput").fill("继续，我在看。")
+    page.locator("#chatForm button[type=submit]").click()
+    assert page.locator(".chat-line").count() == 2
+    assert page.evaluate("document.documentElement.dataset.game === 'trpg'")
+    page.screenshot(path=str(ARTIFACTS / "mobile-trpg-spectator.png"), full_page=True)
+    assert not errors, errors
+    context.close()
+
+
+def test_trpg_player_roll(browser):
+    context = browser.new_context(viewport={"width": 430, "height": 900})
+    page, errors = page_with_errors(context)
+    page.locator('input[name="gameType"][value="trpg"]').check(force=True)
+    page.locator('input[name="mode"][value="human_play_ai_watch"]').check(force=True)
+    page.locator("#createForm button[type=submit]").click()
+    assert page.locator("#rollD20").is_enabled()
+    page.locator("#rollD20").click()
+    assert page.locator("#diceResult").inner_text() != "—"
+    page.locator("#actionInput").fill("向守门人出示未署名的信")
+    page.locator("#observeAction").click()
+    assert page.locator("#roundNumber").inner_text() == "3"
+    assert not errors, errors
+    context.close()
+
+
+def test_desktop_and_minor_gate(browser):
+    desktop = browser.new_context(viewport={"width": 1440, "height": 900})
+    page, errors = page_with_errors(desktop)
+    assert page.locator(".case-cover").is_visible()
+    assert page.locator('.game-type-fieldset input[value="escape"]').is_checked()
+    page.screenshot(path=str(ARTIFACTS / "desktop-landing-v2.png"), full_page=True)
+    assert not errors, errors
+    desktop.close()
+
+    minor = browser.new_context(viewport={"width": 390, "height": 844})
+    page = minor.new_page()
+    page.goto(URL, wait_until="networkidle")
+    page.locator("#declineAdult").click()
     assert page.locator("#blockedScreen").is_visible()
     assert not page.locator("#appShell").is_visible()
-    context.close()
+    minor.close()
 
 
 with sync_playwright() as playwright:
@@ -67,9 +116,10 @@ with sync_playwright() as playwright:
         headless=True,
         executable_path=r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     )
-    run_mobile(browser)
-    run_desktop(browser)
-    run_minor_gate(browser)
+    test_human_player_ai_spectator(browser)
+    test_ai_player_human_spectator_trpg(browser)
+    test_trpg_player_roll(browser)
+    test_desktop_and_minor_gate(browser)
     browser.close()
 
-print("UI smoke passed: mobile game/save/resume and desktop landing")
+print("UI smoke passed: spectators/chat/TRPG/referee separation/theme/save/resume/minor gate")
