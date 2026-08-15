@@ -45,10 +45,10 @@
       <section class="landing" id="landingView">
         <div class="landing__copy">
           <p class="archive-kicker">CASE FILE / NEW</p>
-          <h1>有些出口，<br>需要两种目光。</h1>
-          <p class="landing__intro">人类和 AI 各自观察、各自推理，也各自保留不知道的事。谜底只存在于裁判引擎，任何玩家都不能提前翻页。</p>
+          <h1>有些世界，<br>需要不同身份。</h1>
+          <p class="landing__intro">密室与跑团共用一套世界抽选。玩家负责行动，观战者负责交流，裁判使用独立人格与独立路线掌管谜底和世界状态。</p>
           <div class="principles" aria-label="游戏原则">
-            <span>1–4 个平等席位</span>
+            <span>玩家与观战席分离</span>
             <span>发现才可见</span>
             <span>每步即时存档</span>
           </div>
@@ -60,6 +60,18 @@
             <span>建立新现场</span>
             <small>ARCHIVE NO. <b id="archiveNumber">----</b></small>
           </header>
+
+          <fieldset class="game-type-fieldset">
+            <legend>选择玩法</legend>
+            <label class="mode-option mode-option--major">
+              <input type="radio" name="gameType" value="escape" checked>
+              <span><b>密室逃脱</b><small>观察、线索与机关</small></span>
+            </label>
+            <label class="mode-option mode-option--major">
+              <input type="radio" name="gameType" value="trpg">
+              <span><b>跑团剧场</b><small>角色、叙事与 d20 检定</small></span>
+            </label>
+          </fieldset>
 
           <fieldset class="mode-fieldset">
             <legend>谁进入房间</legend>
@@ -79,12 +91,40 @@
               <input type="radio" name="mode" value="mixed_party">
               <span><b>混合小队</b><small>人类与多名 AI</small></span>
             </label>
+            <label class="mode-option">
+              <input type="radio" name="mode" value="human_play_ai_watch">
+              <span><b>人类解谜</b><small>一名玩家 · AI 观战</small></span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="mode" value="ai_play_human_watch">
+              <span><b>AI 解谜</b><small>一名 AI 玩家 · 你观战</small></span>
+            </label>
           </fieldset>
 
-          <label class="text-field">
-            <span>你的本次署名</span>
-            <input id="displayName" name="displayName" maxlength="24" value="枔枔" autocomplete="nickname">
-          </label>
+          <div class="identity-grid">
+            <label class="text-field">
+              <span>当前浏览者署名</span>
+              <input id="displayName" name="displayName" maxlength="24" value="枔枔" autocomplete="nickname">
+            </label>
+            <label class="text-field">
+              <span>游玩 / 观战人格</span>
+              <input id="playerPersonaName" name="playerPersonaName" maxlength="24" value="沈砚清" autocomplete="off">
+            </label>
+            <label class="text-field">
+              <span>裁判人格（独立）</span>
+              <input id="refereeName" name="refereeName" maxlength="24" value="无名裁判" autocomplete="off">
+            </label>
+            <label class="text-field">
+              <span>裁判模型路线（独立）</span>
+              <select id="refereeRoute" name="refereeRoute">
+                <option value="本机规则演示">本机规则演示</option>
+                <option value="Atherloom 独立路线（待接入）">Atherloom 独立路线（待接入）</option>
+                <option value="MCP 独立裁判（待接入）">MCP 独立裁判（待接入）</option>
+                <option value="OpenAI 兼容独立路线（待接入）">OpenAI 兼容独立路线（待接入）</option>
+              </select>
+            </label>
+          </div>
+          <p class="route-note">裁判不是玩家席。这里只保存路线名称，不保存 API Key；本机演示不会伪造模型调用。</p>
 
           <div class="draw-preview" aria-live="polite">
             <span class="stamp stamp--world" id="worldPreview">世界待抽取</span>
@@ -119,7 +159,7 @@
         <header class="case-room__header">
           <div>
             <button class="back-link" id="backHome" type="button">← 档案柜</button>
-            <p class="archive-kicker">ACTIVE CASE / <span id="caseId"></span></p>
+            <p class="archive-kicker"><span id="gameTypeLabel">ACTIVE CASE</span> / <span id="caseId"></span></p>
             <h1 id="caseTitle">尚未命名的现场</h1>
           </div>
           <div class="case-stamps"><span class="stamp stamp--world" id="roomWorld"></span><span class="stamp stamp--tone" id="roomTone"></span></div>
@@ -127,13 +167,18 @@
 
         <nav class="mobile-tabs" aria-label="密室页面">
           <button class="active" data-panel="scene" type="button">现场</button>
-          <button data-panel="evidence" type="button">线索</button>
+          <button data-panel="evidence" id="evidenceTab" type="button">线索</button>
           <button data-panel="team" type="button">同伴</button>
         </nav>
 
         <div class="case-grid">
           <aside class="team-panel panel" data-mobile-panel="team">
             <div class="panel__heading"><span>在场者</span><small id="seatCount">1 / 2</small></div>
+            <div class="referee-card">
+              <span>独立裁判线路</span>
+              <strong id="refereeDisplayName">无名裁判</strong>
+              <small id="refereeRouteLabel">本机规则演示</small>
+            </div>
             <div class="seat-list" id="seatList"></div>
             <div class="invite-card">
               <span>一次性入场券</span>
@@ -161,23 +206,50 @@
 
             <article class="scene-copy">
               <span class="scene-copy__time">第 <b id="roundNumber">0</b> 轮 · 入口室</span>
-              <h2>灯刚刚亮起</h2>
+              <h2 id="sceneTitle">灯刚刚亮起</h2>
               <p id="sceneDescription">档案已经建立，但真正的房间要等所有席位到齐后才会打开。此刻只有一张未完成的平面图，以及各自不同的视线。</p>
             </article>
+
+            <section class="trpg-desk" id="trpgDesk" hidden aria-label="跑团角色与检定">
+              <article class="trpg-card trpg-card--character">
+                <small>CHARACTER / 游玩人格</small>
+                <strong id="characterName">尚未登记</strong>
+                <p id="characterRole">身份会随世界主题生成</p>
+              </article>
+              <article class="trpg-card trpg-card--quest">
+                <small>OBJECTIVE / 当前目标</small>
+                <strong id="questTitle">抵达故事的第一处转折</strong>
+                <p>裁判只公开角色此刻能够知道的目标。</p>
+              </article>
+              <article class="trpg-card trpg-card--dice">
+                <small>CHECK / d20 检定</small>
+                <strong id="diceResult">—</strong>
+                <button class="button button--quiet" id="rollD20" type="button">掷一次 d20</button>
+              </article>
+            </section>
 
             <div class="action-desk">
               <label><span>你想做什么</span><textarea id="actionInput" rows="2" placeholder="例如：查看停摆的钟"></textarea></label>
               <div>
-                <button class="button button--quiet" id="speakAction" type="button">告诉同伴</button>
                 <button class="button button--primary" id="observeAction" type="button">观察现场</button>
               </div>
             </div>
+
+            <section class="radio-chat" aria-label="现场聊天">
+              <header><span>现场无线电</span><small>公共频道 · 不占行动回合</small></header>
+              <div class="chat-stream" id="chatStream" aria-live="polite"><p class="chat-empty">频道安静。玩家和观战者都可以在这里说话。</p></div>
+              <form id="chatForm">
+                <label class="sr-only" for="chatInput">发送聊天</label>
+                <input id="chatInput" maxlength="500" autocomplete="off" placeholder="和玩家、观战者或裁判说句话">
+                <button class="button button--quiet" type="submit">发送</button>
+              </form>
+            </section>
 
             <div class="event-stream" id="eventStream" aria-live="polite"></div>
           </section>
 
           <aside class="evidence-panel panel" data-mobile-panel="evidence">
-            <div class="panel__heading"><span>证物与线索</span><small id="clueCount">0 件</small></div>
+            <div class="panel__heading"><span id="evidenceHeading">证物与线索</span><small id="clueCount">0 件</small></div>
             <div class="evidence-list" id="evidenceList">
               <div class="empty-evidence"><i></i><p>先观察房间。只有真正发现的线索才会出现在这里。</p></div>
             </div>

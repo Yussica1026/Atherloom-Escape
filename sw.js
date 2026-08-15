@@ -1,4 +1,4 @@
-const CACHE = "atherloom-escape-shell-v1";
+const CACHE = "atherloom-escape-shell-v2";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./web/styles.css", "./web/app.js", "./web/icon.svg", "./shared/escape-core.mjs"];
 
 self.addEventListener("install", (event) => {
