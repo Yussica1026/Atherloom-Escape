@@ -1,5 +1,5 @@
-const CACHE = "atherloom-escape-shell-v2";
-const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./web/styles.css", "./web/app.js", "./web/icon.svg", "./shared/escape-core.mjs"];
+const CACHE = "atherloom-escape-shell-v3";
+const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./web/styles.css", "./web/app.js", "./web/relay-client.js", "./web/icon.svg", "./shared/escape-core.mjs"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
