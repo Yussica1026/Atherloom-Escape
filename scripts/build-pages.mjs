@@ -9,3 +9,4 @@ await cp("sw.js", "site/sw.js");
 await cp("LICENSE", "site/LICENSE.txt");
 await cp("web", "site/web", { recursive: true });
 await cp("shared/escape-core.mjs", "site/shared/escape-core.mjs");
+await cp("shared/referee-prompt.mjs", "site/shared/referee-prompt.mjs");

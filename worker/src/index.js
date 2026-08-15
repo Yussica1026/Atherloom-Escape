@@ -8,6 +8,7 @@ import {
   startGame,
   viewForSeat
 } from "../../shared/escape-core.mjs";
+import { REFEREE_OPENING_SCHEMA, buildRefereeOpeningMessages, normalizeRefereeOpening, validateRefereeOpeningTheme } from "../../shared/referee-prompt.mjs";
 
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_BODY_BYTES = 32 * 1024;
@@ -81,7 +82,7 @@ CREATE TABLE IF NOT EXISTS escape_games(id TEXT PRIMARY KEY,invite_hash TEXT NOT
 CREATE TABLE IF NOT EXISTS escape_seats(id TEXT PRIMARY KEY,game_id TEXT NOT NULL,client_id TEXT,seat_token_hash TEXT,kind TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'player',display_name TEXT NOT NULL,platform TEXT NOT NULL,seat_no INTEGER NOT NULL,joined_at INTEGER NOT NULL,last_seen_at INTEGER NOT NULL,UNIQUE(game_id,client_id));
 CREATE INDEX IF NOT EXISTS escape_seats_game ON escape_seats(game_id,seat_no);
 CREATE INDEX IF NOT EXISTS escape_seats_token ON escape_seats(seat_token_hash);
-CREATE TABLE IF NOT EXISTS escape_referees(game_id TEXT PRIMARY KEY,display_name TEXT NOT NULL,route_label TEXT NOT NULL,platform TEXT NOT NULL,created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS escape_referees(game_id TEXT PRIMARY KEY,display_name TEXT NOT NULL,route_id TEXT NOT NULL DEFAULT 'local-demo',route_label TEXT NOT NULL,platform TEXT NOT NULL,created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS escape_audit(id TEXT PRIMARY KEY,game_id TEXT,seat_id TEXT,action TEXT NOT NULL,outcome TEXT NOT NULL,created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS escape_audit_game ON escape_audit(game_id,created_at);
   `);
@@ -93,7 +94,31 @@ CREATE INDEX IF NOT EXISTS escape_audit_game ON escape_audit(game_id,created_at)
   if (!seatColumns.results?.some((column) => column.name === "role")) {
     await db.prepare("ALTER TABLE escape_seats ADD COLUMN role TEXT NOT NULL DEFAULT 'player'").run();
   }
+  const refereeColumns = await db.prepare("PRAGMA table_info(escape_referees)").all();
+  if (!refereeColumns.results?.some((column) => column.name === "route_id")) {
+    await db.prepare("ALTER TABLE escape_referees ADD COLUMN route_id TEXT NOT NULL DEFAULT 'local-demo'").run();
+  }
   schemaReady = true;
+}
+
+async function generateRefereeOpening(env, state) {
+  if (!env.AI?.run) throw new Error("referee_ai_unavailable");
+  const model = String(env.REFEREE_MODEL || "@cf/meta/llama-3.1-8b-instruct-fast");
+  const response = await env.AI.run(model, {
+    messages: buildRefereeOpeningMessages({
+      refereeName: state.referee.displayName,
+      gameType: state.gameType,
+      world: state.theme.world,
+      tone: state.theme.tone,
+      seed: state.seed
+    }),
+    response_format: { type: "json_schema", json_schema: REFEREE_OPENING_SCHEMA },
+    max_tokens: 720,
+    temperature: 0.88,
+    seed: state.seed
+  });
+  const opening = validateRefereeOpeningTheme(normalizeRefereeOpening(response?.response ?? response), state.theme);
+  return { ...opening, generatedBy: "referee-ai", generatedAt: Date.now() };
 }
 
 async function findClient(db, rawToken) {
@@ -138,7 +163,8 @@ function errorResponse(error, headers) {
     game_not_found: 404, invite_not_found: 404, seat_not_found: 404,
     room_full: 409, player_slots_full: 409, version_conflict: 409, game_already_started: 409,
     not_enough_players: 409, players_not_ready: 409, game_not_active: 409, not_your_turn: 409,
-    spectator_cannot_act: 403, private_clue_requires_player: 422,
+    spectator_cannot_act: 403, private_clue_requires_player: 422, referee_ai_unavailable: 503,
+    invalid_referee_opening: 502, referee_theme_mismatch: 502, referee_generation_failed: 502, referee_route_unavailable: 422,
     invalid_creator: 422, invalid_seat: 422, unknown_game_type: 422, unknown_mode: 422, event_not_allowed: 422
   };
   const messages = {
@@ -147,6 +173,8 @@ function errorResponse(error, headers) {
     room_full: "席位已经坐满", player_slots_full: "玩家席已经坐满，只能加入观战席", version_conflict: "局面刚刚发生变化，请刷新后重试", game_already_started: "游戏已经开始",
     not_enough_players: "入席人数还不够", players_not_ready: "还有玩家没有准备", game_not_active: "游戏还没有正式开始", not_your_turn: "现在轮到另一位玩家",
     spectator_cannot_act: "观战席不能执行玩家动作", private_clue_requires_player: "私有线索只能交给玩家席",
+    referee_ai_unavailable: "独立裁判 AI 当前没有连接", invalid_referee_opening: "独立裁判没有返回完整开场", referee_theme_mismatch: "独立裁判返回的开场与本局题材不匹配",
+    referee_generation_failed: "独立裁判生成开场失败，请重新建局", referee_route_unavailable: "所选裁判路线尚未接通",
     invalid_creator: "创建者信息不完整", invalid_seat: "席位信息不完整", unknown_game_type: "未知的玩法", unknown_mode: "未知的参与模式",
     event_not_allowed: "这种事件不能由玩家直接提交"
   };
@@ -170,8 +198,11 @@ async function handle(request, env) {
     const role = body.role === "spectator" ? "spectator" : "player";
     const displayName = cleanText(body.display_name, 24);
     const platform = cleanText(body.platform || "web", 30);
+    const routeId = cleanText(body.referee?.route_id || "local-demo", 40);
+    if (!["local-demo", "workers-ai"].includes(routeId)) throw new Error("referee_route_unavailable");
     const referee = {
       displayName: cleanText(body.referee?.display_name || "规则裁判", 24),
+      routeId,
       routeLabel: cleanText(body.referee?.route_label || "独立裁判路线", 40),
       platform: cleanText(body.referee?.platform || "relay", 30)
     };
@@ -181,16 +212,24 @@ async function handle(request, env) {
     const code = inviteCode();
     const seatToken = client ? "" : randomSecret("aes_");
     const state = createGame({ id: gameId, gameType, mode, seed: crypto.getRandomValues(new Uint32Array(1))[0], creator: { id: seatId, kind, role, displayName, platform }, referee });
+    if (routeId === "workers-ai") {
+      try { state.opening = await generateRefereeOpening(env, state); }
+      catch (error) {
+        if (["referee_ai_unavailable", "invalid_referee_opening", "referee_theme_mismatch"].includes(error?.message)) throw error;
+        console.error("referee opening generation failed", error);
+        throw new Error("referee_generation_failed");
+      }
+    }
     await env.DB.batch([
       env.DB.prepare("INSERT INTO escape_games(id,invite_hash,game_type,mode,world,tone,status,version,state_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(gameId, await sha256(code.replaceAll("-", "")), gameType, mode, state.theme.world, state.theme.tone, state.status, state.version, JSON.stringify(state), state.createdAt, state.updatedAt),
       env.DB.prepare("INSERT INTO escape_seats(id,game_id,client_id,seat_token_hash,kind,role,display_name,platform,seat_no,joined_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
         .bind(seatId, gameId, client?.id || null, seatToken ? await sha256(seatToken) : null, kind, role, displayName, platform, 1, state.createdAt, state.createdAt),
-      env.DB.prepare("INSERT INTO escape_referees(game_id,display_name,route_label,platform,created_at) VALUES(?,?,?,?,?)")
-        .bind(gameId, referee.displayName, referee.routeLabel, referee.platform, state.createdAt)
+      env.DB.prepare("INSERT INTO escape_referees(game_id,display_name,route_id,route_label,platform,created_at) VALUES(?,?,?,?,?,?)")
+        .bind(gameId, referee.displayName, referee.routeId, referee.routeLabel, referee.platform, state.createdAt)
     ]);
     await audit(env.DB, gameId, seatId, "game_create", "ok");
-    return json({ game_id: gameId, seat_id: seatId, seat_token: seatToken || undefined, invite_code: code, theme: state.theme, game_type: gameType, mode, role, referee, version: state.version }, 201, headers);
+    return json({ game_id: gameId, seat_id: seatId, seat_token: seatToken || undefined, invite_code: code, theme: state.theme, game_type: gameType, mode, role, referee: state.referee, opening: state.opening, version: state.version }, 201, headers);
   }
 
   if (request.method === "POST" && url.pathname === "/v1/escape/join") {
