@@ -9,7 +9,9 @@ import {
   startGame,
   viewForSeat
 } from "../shared/escape-core.mjs";
+import { createLocalOpening } from "../shared/referee-prompt.mjs";
 import { EscapeRelayClient, RelayError, RELAY_URL } from "./relay-client.js";
+import { generateMapModel, mapSvgMarkup } from "./map-generator.js";
 
 const STORAGE_KEY = "atherloom:escape:local-game:v1";
 const ONLINE_KEY = "atherloom:escape:online-session:v1";
@@ -43,7 +45,8 @@ let relayPending = 0;
 function normalizeState(candidate) {
   if (!candidate) return null;
   candidate.gameType ||= "escape";
-  candidate.referee ||= { displayName: "规则裁判", routeLabel: "本机规则演示", platform: "local-demo" };
+  candidate.referee ||= { displayName: "规则裁判", routeId: "local-demo", routeLabel: "本机规则演示", platform: "local-demo" };
+  candidate.referee.routeId ||= "local-demo";
   candidate.seats = (candidate.seats || []).map((seat) => ({ role: "player", ...seat }));
   return candidate;
 }
@@ -113,6 +116,14 @@ function formValue(name, fallback = "") {
 function currentMode() { return formValue("mode", "duo"); }
 function currentGameType() { return formValue("gameType", "escape"); }
 
+function selectedRefereeRoute() {
+  const select = $("#refereeRoute");
+  return {
+    routeId: select.value,
+    routeLabel: select.selectedOptions[0]?.textContent.trim() || "独立裁判路线"
+  };
+}
+
 function archiveNumber() {
   const now = new Date();
   return `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
@@ -162,6 +173,9 @@ function renderLanding() {
 function updateConnectionChoice() {
   const choice = formValue("connection", "online");
   const online = choice === "online";
+  const route = $("#refereeRoute");
+  if (online && route.value === "local-demo") route.value = "workers-ai";
+  if (!online && route.value === "workers-ai") route.value = "local-demo";
   $("#createRoom").textContent = online ? "抽取并建立联机房间" : "抽取并建立本机演示";
   $("#resumeGame").hidden = online ? !onlineSession : !loadState();
   $("#resumeGame").textContent = online ? "回到上次联机现场" : "继续本机演示现场";
@@ -184,7 +198,7 @@ function renderEvidence(view) {
     $("#clueCount").textContent = `${view.clues.length + 2} 项`;
     const statusCards = [
       { title: "角色状态", summary: "稳定 · 尚未获得持续负面状态" },
-      { title: "当前任务", summary: "抵达故事的第一处转折，并判断谁值得信任。" }
+      { title: "当前任务", summary: view.opening?.objective || "等待裁判公开本幕目标。" }
     ];
     $("#evidenceList").innerHTML = [...statusCards, ...view.clues].map((item, index) => `
       <article class="evidence-card"><small>RECORD ${String(index + 1).padStart(2, "0")}</small><b>${escapeHtml(item.title)}</b><p>${escapeHtml(item.summary)}</p></article>`).join("");
@@ -198,15 +212,50 @@ function renderEvidence(view) {
     : `<div class="empty-evidence"><i></i><p>先观察房间。只有真正发现的线索才会出现在这里。</p></div>`;
 }
 
+function openingForView(view) {
+  if (view.opening) return view.opening;
+  const provisionalMap = generateMapModel({
+    seed: view.seed,
+    world: view.theme.world,
+    tone: view.theme.tone,
+    gameType: view.gameType
+  });
+  return createLocalOpening({
+    refereeName: view.referee.displayName,
+    gameType: view.gameType,
+    world: view.theme.world,
+    tone: view.theme.tone,
+    mapPlaces: provisionalMap.nodes.map((node) => node.label)
+  });
+}
+
+function renderGeneratedMap(view, opening) {
+  const model = generateMapModel({
+    seed: view.seed,
+    world: view.theme.world,
+    tone: view.theme.tone,
+    gameType: view.gameType,
+    mapPlaces: opening.mapPlaces
+  });
+  const svg = $("#generatedMap");
+  const title = view.gameType === "trpg" ? "本局旅途路线" : "本局密室结构";
+  svg.innerHTML = `<title id="planTitle">${title}</title>${mapSvgMarkup({ ...model, dangerLabel: opening.dangerLabel || model.dangerLabel })}`;
+  svg.dataset.kind = model.kind;
+  $("#mapProgress").textContent = model.metric;
+  $("#mapCaptionLabel").textContent = model.caption;
+  return model;
+}
+
 function renderRoom() {
   if (!state || !activeSeatId) return renderLanding();
   const view = isOnline() ? state : viewForSeat(state, activeSeatId);
+  const opening = openingForView(view);
   applyTheme(view);
   $("#landingView").hidden = true;
   $("#roomView").hidden = false;
   $("#caseId").textContent = state.id.slice(-10).toUpperCase();
   $("#gameTypeLabel").textContent = view.gameType === "trpg" ? "ACTIVE CAMPAIGN" : "ACTIVE CASE";
-  $("#caseTitle").textContent = `${view.theme.world} · ${view.theme.tone} · ${GAME_TYPES[view.gameType].label}`;
+  $("#caseTitle").textContent = opening.title;
   $("#roomWorld").textContent = view.theme.world;
   $("#roomTone").textContent = view.theme.tone;
   $("#seatCount").textContent = `${view.seats.length} / ${MODES[view.mode].maxSeats}`;
@@ -215,7 +264,6 @@ function renderRoom() {
   $("#stateVersion").textContent = view.version;
   $("#eventCursor").textContent = view.eventCursor;
   $("#saveLocation").textContent = isOnline() ? "Relay 联机存档" : "本机演示";
-  $("#mapProgress").textContent = `${Math.min(18 + view.clues.length * 14, 94)}%`;
   $("#refereeDisplayName").textContent = view.referee.displayName;
   $("#refereeRouteLabel").textContent = `${view.referee.routeLabel} · ${view.referee.platform}`;
 
@@ -229,13 +277,14 @@ function renderRoom() {
     </div>`).join("") + Array.from({ length: Math.max(0, MODES[view.mode].minSeats - view.seats.length) }, () => `<div class="seat seat--empty"><span class="seat__mark">＋</span><span><b>等待同伴</b><small>用邀请码从其他平台入席</small></span></div>`).join("");
 
   const isTrpg = view.gameType === "trpg";
-  $("#roomPlan").hidden = isTrpg;
+  renderGeneratedMap(view, opening);
+  $("#roomPlan").hidden = false;
   $("#trpgDesk").hidden = !isTrpg;
-  $("#sceneTitle").textContent = isTrpg ? "第一幕等待一句行动" : "灯刚刚亮起";
-  $("#sceneDescription").textContent = isTrpg
-    ? `由${view.referee.displayName}主持的${view.theme.world}故事刚刚开场。空气带着${view.theme.tone}的预兆；裁判知道世界事实，玩家只知道角色眼前的部分。`
-    : "入口室的灯管发出轻微电流声。墙上的钟停在 02:17，玻璃后的线路图缺了一站，而门禁屏幕只显示一行：请由下一位观察者确认。";
-  $("#actionInput").placeholder = isTrpg ? "例如：我向守门人出示那封未署名的信" : "例如：查看停摆的钟";
+  $("#sceneTitle").textContent = opening.title;
+  $("#sceneDescription").textContent = opening.opening;
+  $("#startLocation").textContent = opening.startLocation;
+  $("#questTitle").textContent = opening.objective;
+  $("#actionInput").placeholder = isTrpg ? `描述你在“${opening.startLocation}”采取的行动` : `描述你要调查“${opening.startLocation}”的什么`;
   $("#observeAction").textContent = isTrpg ? "提交行动" : "观察现场";
   $("#observeAction").disabled = view.actionRequired !== "act";
   $("#rollD20").disabled = !isTrpg || view.actionRequired !== "act";
@@ -286,7 +335,8 @@ function takeDemoTurn(initial = false) {
     const roll = initial ? 14 : 11;
     recordPlayerEvent(state, { seatId: demo.id, type: "trpg.rolled", requestId: crypto.randomUUID(), data: { roll, difficulty: 12, success: roll >= 12, demo: true } });
   } else {
-    recordPlayerEvent(state, { seatId: demo.id, type: "player.acted", requestId: crypto.randomUUID(), data: { action: "demo-observe", target: initial ? "本机演示人格检查了入口处的光源" : "本机演示人格记录了门禁屏幕的变化", demo: true } });
+    const place = state.opening?.mapPlaces?.[initial ? 0 : 1] || state.opening?.startLocation || "当前区域";
+    recordPlayerEvent(state, { seatId: demo.id, type: "player.acted", requestId: crypto.randomUUID(), data: { action: "demo-observe", target: `本机演示人格调查了“${place}”`, demo: true } });
   }
 }
 
@@ -308,7 +358,12 @@ const RELAY_MESSAGES = {
   players_not_ready: "还有席位没有准备好",
   not_your_turn: "现在轮到另一位玩家",
   spectator_cannot_act: "观战席不能行动，但可以继续聊天",
-  game_not_active: "房间还没有正式开场"
+  game_not_active: "房间还没有正式开场",
+  referee_ai_unavailable: "独立裁判 AI 当前没有连接",
+  invalid_referee_opening: "独立裁判没有返回完整开场",
+  referee_theme_mismatch: "独立裁判写出的开场与本局题材不匹配",
+  referee_generation_failed: "独立裁判生成开场失败，请重新建局",
+  referee_route_unavailable: "所选裁判路线尚未接通"
 };
 
 function relayMessage(error) {
@@ -390,10 +445,10 @@ async function readyAndStartOnline() {
   await mutateOnline((version) => relay.startGame(onlineSession.gameId, onlineSession.seatToken, version));
 }
 
-async function createOnlineGame({ mode, gameType, displayName, refereeName, routeLabel }) {
+async function createOnlineGame({ mode, gameType, displayName, refereeName, routeId, routeLabel }) {
   runtimeMode = "online";
   stopPolling();
-  setConnectionStatus("正在建立 Relay 房间…", "connecting");
+  setConnectionStatus("正在请独立裁判抽取地图与开场…", "connecting");
   const role = mode === "ai_play_human_watch" ? "spectator" : "player";
   const response = await relay.createGame({
     game_type: gameType,
@@ -404,8 +459,9 @@ async function createOnlineGame({ mode, gameType, displayName, refereeName, rout
     platform: "web",
     referee: {
       display_name: refereeName,
+      route_id: routeId,
       route_label: routeLabel,
-      platform: routeLabel === "本机规则演示" ? "relay-rules" : "route-reserved"
+      platform: routeId === "workers-ai" ? "workers-ai" : routeId === "local-demo" ? "relay-rules" : "route-reserved"
     }
   });
   saveOnlineSession({
@@ -453,11 +509,11 @@ $("#createForm").addEventListener("submit", async (event) => {
   const displayName = $("#displayName").value.trim() || "玩家";
   const personaName = $("#playerPersonaName").value.trim() || "本机演示人格";
   const refereeName = $("#refereeName").value.trim() || "规则裁判";
-  const routeLabel = $("#refereeRoute").value;
+  const selectedRoute = selectedRefereeRoute();
   button.disabled = true;
   try {
     if (formValue("connection", "online") === "online") {
-      await createOnlineGame({ mode, gameType, displayName, refereeName, routeLabel });
+      await createOnlineGame({ mode, gameType, displayName, refereeName, ...selectedRoute });
       return;
     }
     runtimeMode = "local";
@@ -476,7 +532,15 @@ $("#createForm").addEventListener("submit", async (event) => {
     gameType,
     mode,
     creator,
-    referee: { displayName: refereeName, routeLabel, platform: routeLabel === "本机规则演示" ? "local-demo" : "配置记录（未连接）" }
+    referee: { displayName: refereeName, routeId: "local-demo", routeLabel: "本机规则演示", platform: "local-demo" }
+  });
+  const localMap = generateMapModel({ seed: state.seed, world: state.theme.world, tone: state.theme.tone, gameType: state.gameType });
+  state.opening = createLocalOpening({
+    refereeName,
+    gameType: state.gameType,
+    world: state.theme.world,
+    tone: state.theme.tone,
+    mapPlaces: localMap.nodes.map((node) => node.label)
   });
   state.inviteCode = randomCode();
   prepareLocalCompanion(personaName);
@@ -515,8 +579,8 @@ $("#observeAction").addEventListener("click", async () => {
       const clueNumber = state.publicClues.length + 1;
       discoverClue(state, {
         clueId: `local-${clueNumber}`,
-        title: clueNumber === 1 ? "停在 02:17 的钟" : `关于“${target.slice(0, 12)}”的痕迹`,
-        summary: clueNumber === 1 ? "秒针没有损坏。有人主动切断了它与站内时间服务器的同步。" : "这条本机演示线索已由独立裁判写入即时存档。",
+        title: `关于“${target.slice(0, 12)}”的痕迹`,
+        summary: `这条本机规则演示线索属于${state.theme.world} × ${state.theme.tone}现场，已写入即时存档。`,
         actorSeatId: activeSeatId
       });
     }

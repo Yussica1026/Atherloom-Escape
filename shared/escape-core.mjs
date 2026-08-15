@@ -70,6 +70,7 @@ export function createGame({ id, seed, gameType = "escape", mode = "duo", creato
   const theme = drawTheme(normalizedSeed);
   const normalizedReferee = {
     displayName: String(referee.displayName || "规则裁判").slice(0, 24),
+    routeId: String(referee.routeId || "local-demo").slice(0, 40),
     routeLabel: String(referee.routeLabel || "本机规则").slice(0, 40),
     platform: String(referee.platform || "local").slice(0, 30)
   };
@@ -80,6 +81,7 @@ export function createGame({ id, seed, gameType = "escape", mode = "duo", creato
     gameType,
     mode,
     referee: normalizedReferee,
+    opening: null,
     status: "lobby",
     phase: "assembly",
     version: 1,
@@ -248,7 +250,8 @@ export function viewForSeat(state, seatId, after = 0) {
     theme: state.theme,
     gameType: state.gameType || "escape",
     mode: state.mode,
-    referee: state.referee || { displayName: "规则裁判", routeLabel: "本机规则", platform: "local" },
+    referee: state.referee || { displayName: "规则裁判", routeId: "local-demo", routeLabel: "本机规则", platform: "local" },
+    opening: state.opening || null,
     status: state.status,
     phase: state.phase,
     version: state.version,

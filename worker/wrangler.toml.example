@@ -16,3 +16,7 @@ migrations_dir = "migrations"
 
 [vars]
 ALLOWED_ORIGINS = "https://yussica1026.github.io,http://127.0.0.1:8794,http://localhost:8794"
+REFEREE_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
+
+[ai]
+binding = "AI"

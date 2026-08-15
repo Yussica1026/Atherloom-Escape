@@ -165,12 +165,21 @@ main { flex: 1; min-height: 0; }
 
 .scene-panel { padding: clamp(20px, 3vw, 42px); background: rgba(243,247,246,.26); }
 .room-plan { position: relative; padding: 18px; border: 1px solid var(--line); background: rgba(220,231,232,.5); overflow: hidden; }
-.room-plan::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 28% 52%, transparent 0 19%, rgba(220,231,232,.72) 45%, rgba(220,231,232,.96) 78%); }
+.room-plan::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .18; background: radial-gradient(circle at 28% 52%, transparent 0 22%, rgba(220,231,232,.72) 52%, rgba(220,231,232,.96) 88%); }
 .room-plan svg { position: relative; z-index: 1; width: 100%; max-height: 330px; }
 .plan-grid { fill: none; stroke: rgba(49,88,106,.12); stroke-width: 1; }
 .plan-lines { fill: none; stroke: var(--blueprint); stroke-width: 4; stroke-linecap: square; stroke-linejoin: miter; stroke-dasharray: 1800; animation: draw-plan 2.3s cubic-bezier(.2,.7,.2,1) both; }
 .plan-door { stroke-width: 2; }
 .plan-labels { fill: var(--blueprint); font: 12px var(--mono); letter-spacing: .12em; }
+.plan-routes { fill: none; stroke: var(--blueprint); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 1800; animation: draw-plan 2.3s cubic-bezier(.2,.7,.2,1) both; }
+.plan-room rect { fill: color-mix(in srgb, var(--cold-white) 34%, transparent); stroke: var(--blueprint); stroke-width: 2; }
+.plan-room text { text-anchor: middle; fill: var(--blueprint); font: 11px var(--mono); letter-spacing: .05em; }
+.plan-room--danger rect { fill: color-mix(in srgb, var(--seal) 8%, transparent); stroke: var(--seal); stroke-dasharray: 6 4; }
+.plan-node circle { fill: color-mix(in srgb, var(--cold-white) 76%, transparent); stroke: var(--blueprint); stroke-width: 3; }
+.plan-node text { text-anchor: middle; fill: var(--blueprint); font: 10px var(--mono); letter-spacing: .03em; }
+.plan-node--danger circle { fill: color-mix(in srgb, var(--seal) 12%, transparent); stroke: var(--seal); stroke-dasharray: 5 3; }
+.plan-contours { fill: none; stroke: rgba(49,88,106,.16); stroke-width: 1.5; stroke-dasharray: 4 7; }
+.plan-danger-label { text-anchor: middle; fill: var(--seal); font: 9px var(--mono); letter-spacing: .08em; }
 .plan-position { fill: var(--seal); stroke: var(--cold-white); stroke-width: 4; }
 .plan-caption { position: relative; z-index: 2; display: flex; justify-content: space-between; color: var(--ink-soft); font: 9px var(--mono); }
 .plan-caption b { color: var(--blueprint); }
