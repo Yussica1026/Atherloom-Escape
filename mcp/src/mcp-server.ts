@@ -26,16 +26,23 @@ export function createEscapeMcpServer(config: RelayConfig): McpServer {
   const server = new McpServer({ name: "atherloom-escape-mcp", version: "0.1.0" });
 
   server.registerTool("atherloom_escape_create", {
-    title: "创建文字密室",
-    description: "创建 1–4 席文字密室并由服务端随机抽取世界观与故事气质。返回一次性邀请码；模型 API Key 和客户端令牌不会返回。",
-    inputSchema: z.object({ mode: z.enum(["ai_solo", "duo", "ai_party", "mixed_party"]), display_name: z.string().trim().min(1).max(24) }), outputSchema, annotations: mutate
-  }, async ({ mode, display_name }) => run(() => relay.create(mode, display_name)));
+    title: "创建密室或跑团房间",
+    description: "创建 1–4 席密室/跑团房间并随机抽取世界与气质。裁判人格和路线独立于游玩人格，只保存路线标签，不返回任何模型密钥。",
+    inputSchema: z.object({
+      game_type: z.enum(["escape", "trpg"]).default("escape"),
+      mode: z.enum(["ai_solo", "duo", "ai_party", "mixed_party", "human_play_ai_watch", "ai_play_human_watch"]),
+      role: z.enum(["player", "spectator"]).default("player"),
+      display_name: z.string().trim().min(1).max(24),
+      referee_name: z.string().trim().min(1).max(24).default("规则裁判"),
+      referee_route: z.string().trim().min(1).max(40).default("独立裁判路线")
+    }), outputSchema, annotations: mutate
+  }, async ({ game_type, mode, role, display_name, referee_name, referee_route }) => run(() => relay.create(game_type, mode, role, display_name, referee_name, referee_route)));
 
   server.registerTool("atherloom_escape_join", {
     title: "加入文字密室",
     description: "使用人类转交的一次性邀请码入席。入席只授予当前游戏席位，不开放用户隐私、其他人格记忆或未发现谜底。",
-    inputSchema: z.object({ invite_code: z.string().trim().min(8).max(16), display_name: z.string().trim().min(1).max(24) }), outputSchema, annotations: mutate
-  }, async ({ invite_code, display_name }) => run(() => relay.join(invite_code, display_name)));
+    inputSchema: z.object({ invite_code: z.string().trim().min(8).max(16), display_name: z.string().trim().min(1).max(24), role: z.enum(["player", "spectator"]).default("player") }), outputSchema, annotations: mutate
+  }, async ({ invite_code, display_name, role }) => run(() => relay.join(invite_code, display_name, role)));
 
   server.registerTool("atherloom_escape_state", {
     title: "读取自己的密室视图",
@@ -62,10 +69,16 @@ export function createEscapeMcpServer(config: RelayConfig): McpServer {
   }, async ({ game_id, expected_version }) => run(() => relay.start(game_id, expected_version)));
 
   server.registerTool("atherloom_escape_say", {
-    title: "告诉密室同伴",
-    description: "向当前房间发送一条公开交流。交谈不抢占行动回合；不得借游戏索取或泄露用户隐私。",
+    title: "发送现场聊天",
+    description: "向房间公共聊天频道发送消息。玩家和观战者都能聊天，交谈不抢占行动回合，也不会授予私有线索权限。",
     inputSchema: z.object({ game_id: gameId, expected_version: z.number().int().min(1), content: z.string().trim().min(1).max(2000) }), outputSchema, annotations: mutate
-  }, async ({ game_id, expected_version, content }) => run(() => relay.event(game_id, expected_version, "player.said", { content }, randomUUID())));
+  }, async ({ game_id, expected_version, content }) => run(() => relay.event(game_id, expected_version, "chat.sent", { content }, randomUUID())));
+
+  server.registerTool("atherloom_escape_roll", {
+    title: "请求跑团检定",
+    description: "轮到当前跑团玩家时请求一次服务端 d20 检定。骰点由 Relay 生成；观战席不能代替玩家掷骰。",
+    inputSchema: z.object({ game_id: gameId, expected_version: z.number().int().min(1), label: z.string().trim().min(1).max(80), modifier: z.number().int().min(-10).max(20).default(0), difficulty: z.number().int().min(1).max(40).default(12) }), outputSchema, annotations: mutate
+  }, async ({ game_id, expected_version, label, modifier, difficulty }) => run(() => relay.event(game_id, expected_version, "trpg.rolled", { label, modifier, difficulty }, randomUUID())));
 
   server.registerTool("atherloom_escape_observe", {
     title: "观察密室目标",

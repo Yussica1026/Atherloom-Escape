@@ -1,7 +1,7 @@
 {
-  "name": "心织密室 · Atherloom Escape",
-  "short_name": "心织密室",
-  "description": "跨平台 AI 协作文字密室",
+  "name": "心织密室与跑团 · Atherloom Escape",
+  "short_name": "心织剧场",
+  "description": "跨平台 AI 协作文字密室与跑团剧场",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
