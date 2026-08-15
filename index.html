@@ -118,11 +118,11 @@
           <div class="identity-grid">
             <label class="text-field">
               <span>当前浏览者署名</span>
-              <input id="displayName" name="displayName" maxlength="24" value="枔枔" autocomplete="nickname">
+              <input id="displayName" name="displayName" maxlength="24" placeholder="输入你的署名" autocomplete="off">
             </label>
             <label class="text-field">
               <span>游玩 / 观战人格</span>
-              <input id="playerPersonaName" name="playerPersonaName" maxlength="24" value="沈砚清" autocomplete="off">
+              <input id="playerPersonaName" name="playerPersonaName" maxlength="24" placeholder="输入游玩或观战人格" autocomplete="off">
             </label>
             <label class="text-field">
               <span>裁判人格（独立）</span>
@@ -131,14 +131,15 @@
             <label class="text-field">
               <span>裁判模型路线（独立）</span>
               <select id="refereeRoute" name="refereeRoute">
-                <option value="本机规则演示">本机规则演示</option>
-                <option value="Atherloom 独立路线（待接入）">Atherloom 独立路线（待接入）</option>
-                <option value="MCP 独立裁判（待接入）">MCP 独立裁判（待接入）</option>
-                <option value="OpenAI 兼容独立路线（待接入）">OpenAI 兼容独立路线（待接入）</option>
+                <option value="workers-ai" selected>Cloudflare Workers AI · 独立裁判</option>
+                <option value="local-demo">本机规则演示</option>
+                <option value="atherloom-pending">Atherloom 独立路线（待接入）</option>
+                <option value="mcp-pending">MCP 独立裁判（待接入）</option>
+                <option value="openai-pending">OpenAI 兼容独立路线（待接入）</option>
               </select>
             </label>
           </div>
-          <p class="route-note">裁判不是玩家席。这里只保存路线名称，不保存 API Key；本机演示不会伪造模型调用。</p>
+          <p class="route-note">裁判不是玩家席。联机默认由独立 Workers AI 生成一次开场并存档；网页不保存 API Key。本机演示不会伪造模型调用。</p>
 
           <div class="draw-preview" aria-live="polite">
             <span class="stamp stamp--world" id="worldPreview">世界待抽取</span>
@@ -157,7 +158,7 @@
           <h2>加入一间已经亮灯的房间</h2>
           <label class="text-field"><span>一次性邀请码</span><input id="inviteCode" maxlength="16" placeholder="例如 A7K4-M2P9" autocomplete="off"></label>
           <div class="join-identity-grid">
-            <label class="text-field"><span>入席署名</span><input id="joinDisplayName" maxlength="24" value="枔枔" autocomplete="nickname"></label>
+            <label class="text-field"><span>入席署名</span><input id="joinDisplayName" maxlength="24" placeholder="输入你的署名" autocomplete="off"></label>
             <label class="text-field"><span>入席身份</span><select id="joinRole"><option value="player">玩家席</option><option value="spectator">观战席</option></select></label>
           </div>
           <p class="form-note">加入后会自动准备；人齐时由 Relay 开场。观战席可聊天，但不能行动或查看玩家私有线索。</p>
@@ -212,19 +213,19 @@
 
           <section class="scene-panel panel mobile-active" data-mobile-panel="scene">
             <div class="room-plan" id="roomPlan" aria-label="逐步显现的房间平面图">
-              <svg viewBox="0 0 600 410" role="img" aria-labelledby="planTitle">
+              <svg id="generatedMap" viewBox="0 0 600 410" role="img" aria-labelledby="planTitle">
                 <title id="planTitle">当前已发现的房间结构</title>
                 <g class="plan-grid"><path d="M30 30H570M30 80H570M30 130H570M30 180H570M30 230H570M30 280H570M30 330H570M30 380H570M50 20V390M100 20V390M150 20V390M200 20V390M250 20V390M300 20V390M350 20V390M400 20V390M450 20V390M500 20V390M550 20V390"/></g>
                 <g class="plan-lines"><path d="M95 76h286v104h126v154H252v-74H95z"/><path d="M381 76v184M252 180v154"/><path class="plan-door" d="M252 232q30 0 30 28"/></g>
                 <g class="plan-labels"><text x="118" y="126">入口室</text><text x="410" y="132">未确认</text><text x="304" y="304">封存区</text></g>
                 <circle class="plan-position" cx="150" cy="210" r="9"/>
               </svg>
-              <div class="plan-caption"><span>已绘制 <b id="mapProgress">18%</b></span><span>现场会随探索显影</span></div>
+              <div class="plan-caption"><span id="mapMetricLabel">已生成 <b id="mapProgress">—</b></span><span id="mapCaptionLabel">结构会随新房间改变</span></div>
             </div>
 
             <article class="scene-copy">
-              <span class="scene-copy__time">第 <b id="roundNumber">0</b> 轮 · 入口室</span>
-              <h2 id="sceneTitle">灯刚刚亮起</h2>
+              <span class="scene-copy__time">第 <b id="roundNumber">0</b> 轮 · <span id="startLocation">入口</span></span>
+              <h2 id="sceneTitle">等待裁判开场</h2>
               <p id="sceneDescription">档案已经建立，但真正的房间要等所有席位到齐后才会打开。此刻只有一张未完成的平面图，以及各自不同的视线。</p>
             </article>
 
@@ -247,7 +248,7 @@
             </section>
 
             <div class="action-desk">
-              <label><span>你想做什么</span><textarea id="actionInput" rows="2" placeholder="例如：查看停摆的钟"></textarea></label>
+              <label><span>你想做什么</span><textarea id="actionInput" rows="2" placeholder="描述你要调查的地点或采取的行动"></textarea></label>
               <div>
                 <button class="button button--primary" id="observeAction" type="button">观察现场</button>
               </div>

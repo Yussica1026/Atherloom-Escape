@@ -16,6 +16,7 @@ def page_with_errors(context):
     page.goto(URL, wait_until="networkidle")
     page.locator("#ageGate").wait_for(state="visible")
     page.locator("#confirmAdult").click()
+    page.locator('input[name="connection"][value="local"]').check(force=True)
     return page, errors
 
 
@@ -25,11 +26,11 @@ def test_human_player_ai_spectator(browser):
     page.locator('input[name="mode"][value="human_play_ai_watch"]').check(force=True)
     page.locator("#playerPersonaName").fill("沈砚清")
     page.locator("#refereeName").fill("雾中裁判")
-    page.locator("#refereeRoute").select_option(label="Atherloom 独立路线（待接入）")
+    page.locator("#refereeRoute").select_option("local-demo")
     page.locator("#createForm button[type=submit]").click()
     page.locator("#roomView").wait_for(state="visible")
     assert "雾中裁判" in page.locator("#refereeDisplayName").inner_text()
-    assert "未连接" in page.locator("#refereeRouteLabel").inner_text()
+    assert "本机规则演示" in page.locator("#refereeRouteLabel").inner_text()
     assert "雾中裁判" not in page.locator("#seatList").inner_text()
     assert page.locator(".seat--spectator").count() == 1
     assert "沈砚清" in page.locator(".seat--spectator").inner_text()
@@ -46,6 +47,7 @@ def test_human_player_ai_spectator(browser):
     assert page.evaluate("document.documentElement.dataset.world.length > 0")
     page.screenshot(path=str(ARTIFACTS / "mobile-watch-chat.png"), full_page=True)
     page.reload(wait_until="networkidle")
+    page.locator('input[name="connection"][value="local"]').check(force=True)
     page.locator("#resumeGame").click()
     assert page.locator(".chat-line").count() == 2
     assert not errors, errors
@@ -61,13 +63,15 @@ def test_ai_player_human_spectator_trpg(browser):
     page.locator("#refereeName").fill("夜航主持")
     page.locator("#createForm button[type=submit]").click()
     page.locator("#trpgDesk").wait_for(state="visible")
-    assert page.locator("#roomPlan").is_hidden()
+    assert page.locator("#roomPlan").is_visible()
+    assert page.locator("#generatedMap").get_attribute("data-kind") == "route"
     assert page.locator("#observeAction").is_disabled()
     assert page.locator("#rollD20").is_disabled()
     assert "观战席" in page.locator("#seatList").inner_text()
     assert "沈砚清" in page.locator("#characterName").inner_text()
     assert page.locator("#diceResult").inner_text() != "—"
     assert "夜航主持" not in page.locator("#seatList").inner_text()
+    assert "电流" not in page.locator("#sceneDescription").inner_text()
     page.locator("#chatInput").fill("继续，我在看。")
     page.locator("#chatForm button[type=submit]").click()
     assert page.locator(".chat-line").count() == 2
@@ -97,6 +101,8 @@ def test_desktop_and_minor_gate(browser):
     desktop = browser.new_context(viewport={"width": 1440, "height": 900})
     page, errors = page_with_errors(desktop)
     assert page.locator(".case-cover").is_visible()
+    assert page.locator("#displayName").input_value() == ""
+    assert page.locator("#playerPersonaName").input_value() == ""
     assert page.locator('.game-type-fieldset input[value="escape"]').is_checked()
     page.screenshot(path=str(ARTIFACTS / "desktop-landing-v2.png"), full_page=True)
     assert not errors, errors
