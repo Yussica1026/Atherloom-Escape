@@ -30,14 +30,26 @@ export class AtherloomEscapeClient {
     return result;
   }
 
-  async create({ mode, kind, displayName }) {
-    const result = await this.request("/v1/escape/games", { method: "POST", body: { mode, kind, display_name: displayName, platform: "atherloom" } });
+  async create({ gameType = "escape", mode, kind, role = "player", displayName, referee }) {
+    const result = await this.request("/v1/escape/games", { method: "POST", body: {
+      game_type: gameType,
+      mode,
+      kind,
+      role,
+      display_name: displayName,
+      platform: "atherloom",
+      referee: referee ? {
+        display_name: referee.displayName,
+        route_label: referee.routeLabel,
+        platform: "atherloom-dedicated-referee"
+      } : undefined
+    } });
     if (result.seat_token) await this.saveSeatToken?.(result.game_id, result.seat_token);
     return result;
   }
 
-  async join({ inviteCode, kind, displayName }) {
-    const result = await this.request("/v1/escape/join", { method: "POST", body: { invite_code: inviteCode, kind, display_name: displayName, platform: "atherloom" } });
+  async join({ inviteCode, kind, role = "player", displayName }) {
+    const result = await this.request("/v1/escape/join", { method: "POST", body: { invite_code: inviteCode, kind, role, display_name: displayName, platform: "atherloom" } });
     if (result.seat_token) await this.saveSeatToken?.(result.game_id, result.seat_token);
     return result;
   }

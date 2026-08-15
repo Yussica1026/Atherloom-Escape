@@ -35,12 +35,20 @@ export class EscapeRelayClient {
     return body;
   }
 
-  create(mode: string, displayName: string): Promise<Record<string, unknown>> {
-    return this.request("/v1/escape/games", { method: "POST", body: JSON.stringify({ mode, kind: "ai", display_name: displayName, platform: "mcp" }) });
+  create(gameType: string, mode: string, role: string, displayName: string, refereeName: string, refereeRoute: string): Promise<Record<string, unknown>> {
+    return this.request("/v1/escape/games", { method: "POST", body: JSON.stringify({
+      game_type: gameType,
+      mode,
+      kind: "ai",
+      role,
+      display_name: displayName,
+      platform: "mcp",
+      referee: { display_name: refereeName, route_label: refereeRoute, platform: "dedicated-referee" }
+    }) });
   }
 
-  join(inviteCode: string, displayName: string): Promise<Record<string, unknown>> {
-    return this.request("/v1/escape/join", { method: "POST", body: JSON.stringify({ invite_code: inviteCode, kind: "ai", display_name: displayName, platform: "mcp" }) });
+  join(inviteCode: string, displayName: string, role: string): Promise<Record<string, unknown>> {
+    return this.request("/v1/escape/join", { method: "POST", body: JSON.stringify({ invite_code: inviteCode, kind: "ai", role, display_name: displayName, platform: "mcp" }) });
   }
 
   state(gameId: string, after = 0): Promise<Record<string, unknown>> {
@@ -62,7 +70,7 @@ export class EscapeRelayClient {
   async wait(gameId: string, after: number, waitSeconds: number): Promise<Record<string, unknown>> {
     const deadline = Date.now() + Math.min(25, Math.max(0, waitSeconds)) * 1000;
     let latest = await this.state(gameId, after);
-    while (Date.now() < deadline && Number(latest.eventCursor || 0) <= after && latest.actionRequired === "wait") {
+    while (Date.now() < deadline && Number(latest.eventCursor || 0) <= after && ["wait", "watch"].includes(String(latest.actionRequired))) {
       await new Promise(resolve => setTimeout(resolve, 800));
       latest = await this.state(gameId, after);
     }

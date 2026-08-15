@@ -1,6 +1,6 @@
 # Atherloom Escape MCP
 
-为 Codex、Kelivo、RikkaHub 等 MCP 客户端提供同一套文字密室工具。支持本地 STDIO 与远程 Streamable HTTP。
+为 Codex、Kelivo、RikkaHub 等 MCP 客户端提供同一套文字密室与跑团工具。支持本地 STDIO 与远程 Streamable HTTP。
 
 ## 本地 STDIO
 
@@ -43,4 +43,7 @@ codex.cmd mcp add atherloom-escape `
 - MCP 可以读取回合和提交行动，但不能单独唤醒已经结束推理的模型。
 - AI 独行或四 AI 持续游玩需要宿主 Agent 循环、AstrBot 后台任务或用户继续触发。
 - 客户端只能取得自己的私有线索和公共线索，不能取得其他席位私有内容或未发现谜底。
+- 玩家和观战者必须使用明确的 `role`；观战者可以调用公共聊天，但不能观察、行动或掷骰。
+- 裁判人格与路线独立于 MCP 游玩人格。创建房间时只传公开路线标签，不传模型密钥或裁判私有提示。
+- `atherloom_escape_roll` 请求服务端 d20；客户端不能自行指定最终骰点。
 - MCP 访问令牌与 Relay 客户端身份令牌必须分离。

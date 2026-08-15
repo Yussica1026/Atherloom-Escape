@@ -84,3 +84,43 @@ test("AI 小队允许四席并拒绝第五席", () => {
   assert.equal(state.seats.length, 4);
   assert.throws(() => joinSeat(state, { id: "ai-5", kind: "ai", displayName: "AI 五" }, 5), /room_full/);
 });
+
+test("独立裁判不占玩家席也不进入行动轮次", () => {
+  const state = createGame({
+    id: "g6", seed: 21, mode: "human_play_ai_watch",
+    creator: { id: "human", kind: "human", role: "player", displayName: "枔枔" },
+    referee: { displayName: "雾中裁判", routeLabel: "独立路线 A", platform: "atherloom" }, now: 1
+  });
+  joinSeat(state, { id: "watcher", kind: "ai", role: "spectator", displayName: "沈砚清" }, 2);
+  state.seats.forEach((seat) => setSeatReady(state, seat.id, true, 3 + seat.seatNo));
+  startGame(state, "human", 6);
+  assert.equal(state.seats.length, 2);
+  assert.equal(state.referee.displayName, "雾中裁判");
+  assert.ok(!state.seats.some((seat) => seat.displayName === "雾中裁判"));
+  assert.equal(state.currentSeatId, "human");
+  recordPlayerEvent(state, { seatId: "human", type: "player.acted", requestId: "solo-turn", data: { action: "open" } }, 7);
+  assert.equal(state.currentSeatId, "human");
+});
+
+test("观战席可以聊天但不能行动或接收私有线索", () => {
+  const state = createGame({ id: "g7", seed: 22, mode: "ai_play_human_watch", creator: { id: "watcher", kind: "human", role: "spectator", displayName: "枔枔" }, now: 1 });
+  joinSeat(state, { id: "ai", kind: "ai", role: "player", displayName: "沈砚清" }, 2);
+  state.seats.forEach((seat) => setSeatReady(state, seat.id, true, 3 + seat.seatNo));
+  startGame(state, "watcher", 6);
+  recordPlayerEvent(state, { seatId: "watcher", type: "chat.sent", requestId: "chat-1", data: { content: "我在公共频道" } }, 7);
+  assert.equal(viewForSeat(state, "watcher").actionRequired, "watch");
+  assert.equal(state.currentSeatId, "ai");
+  assert.throws(() => recordPlayerEvent(state, { seatId: "watcher", type: "player.observed", data: { target: "门" } }, 8), /spectator_cannot_act/);
+  assert.throws(() => discoverClue(state, { clueId: "watch-private", title: "不应出现", visibleSeatId: "watcher" }, 9), /private_clue_requires_player/);
+  assert.equal(viewForSeat(state, "watcher").events.at(-1).data.content, "我在公共频道");
+});
+
+test("跑团检定只属于玩家回合并由事件记录", () => {
+  const state = createGame({ id: "g8", seed: 23, gameType: "trpg", mode: "ai_solo", creator: { id: "ai", kind: "ai", role: "player", displayName: "沈砚清" }, now: 1 });
+  setSeatReady(state, "ai", true, 2);
+  startGame(state, "ai", 3);
+  recordPlayerEvent(state, { seatId: "ai", type: "trpg.rolled", requestId: "roll-1", data: { label: "说服守门人", roll: 17, difficulty: 12, success: true } }, 4);
+  assert.equal(state.round, 2);
+  assert.equal(viewForSeat(state, "ai").gameType, "trpg");
+  assert.equal(viewForSeat(state, "ai").events.find((event) => event.type === "trpg.rolled").data.roll, 17);
+});
