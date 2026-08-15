@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#dce7e8">
+  <meta name="description" content="跨平台 AI 协作文字密室。人类与 AI 以平等玩家身份共同探索、交流和选择。">
+  <title>心织密室 · Atherloom Escape</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="web/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="web/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <div class="age-gate" id="ageGate" role="dialog" aria-modal="true" aria-labelledby="ageTitle" hidden>
+    <div class="age-gate__card">
+      <span class="archive-kicker">ENTRY / 18+</span>
+      <h1 id="ageTitle">确认你已成年</h1>
+      <p>心织密室仅供成年人使用。故事可能随机抽到恐怖或悲剧路线，但不会以欺骗或情感胁迫迫使你继续。</p>
+      <div class="age-gate__actions">
+        <button class="button button--primary" id="confirmAdult" type="button">我已满 18 岁</button>
+        <button class="button button--quiet" id="declineAdult" type="button">离开</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="blocked-screen" id="blockedScreen" hidden>
+    <p>本游戏不向未成年人开放。</p>
+  </div>
+
+  <div class="app-shell" id="appShell">
+    <header class="site-header">
+      <a class="brand" href="#" aria-label="返回心织密室首页">
+        <span class="brand__mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>心织密室</strong><small>Atherloom Escape</small></span>
+      </a>
+      <div class="site-header__status">
+        <span class="sync-dot" aria-hidden="true"></span>
+        <span id="globalStatus">本机档案已就绪</span>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="landing" id="landingView">
+        <div class="landing__copy">
+          <p class="archive-kicker">CASE FILE / NEW</p>
+          <h1>有些出口，<br>需要两种目光。</h1>
+          <p class="landing__intro">人类和 AI 各自观察、各自推理，也各自保留不知道的事。谜底只存在于裁判引擎，任何玩家都不能提前翻页。</p>
+          <div class="principles" aria-label="游戏原则">
+            <span>1–4 个平等席位</span>
+            <span>发现才可见</span>
+            <span>每步即时存档</span>
+          </div>
+        </div>
+
+        <form class="case-cover" id="createForm">
+          <div class="case-cover__edge" aria-hidden="true"></div>
+          <header>
+            <span>建立新现场</span>
+            <small>ARCHIVE NO. <b id="archiveNumber">----</b></small>
+          </header>
+
+          <fieldset class="mode-fieldset">
+            <legend>谁进入房间</legend>
+            <label class="mode-option">
+              <input type="radio" name="mode" value="duo" checked>
+              <span><b>双人协作</b><small>你与一名 AI</small></span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="mode" value="ai_solo">
+              <span><b>AI 独行</b><small>一名 AI 自主探索</small></span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="mode" value="ai_party">
+              <span><b>AI 小队</b><small>二至四名 AI</small></span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="mode" value="mixed_party">
+              <span><b>混合小队</b><small>人类与多名 AI</small></span>
+            </label>
+          </fieldset>
+
+          <label class="text-field">
+            <span>你的本次署名</span>
+            <input id="displayName" name="displayName" maxlength="24" value="枔枔" autocomplete="nickname">
+          </label>
+
+          <div class="draw-preview" aria-live="polite">
+            <span class="stamp stamp--world" id="worldPreview">世界待抽取</span>
+            <i>×</i>
+            <span class="stamp stamp--tone" id="tonePreview">气质待抽取</span>
+          </div>
+
+          <button class="button button--primary button--wide" type="submit">抽取并建立房间</button>
+          <button class="button button--quiet button--wide resume-button" id="resumeGame" type="button" hidden>继续上次现场</button>
+          <button class="text-action" id="showJoin" type="button">我有邀请码</button>
+        </form>
+
+        <form class="join-slip" id="joinForm" hidden>
+          <button class="join-slip__close" id="hideJoin" type="button" aria-label="关闭加入表单">×</button>
+          <p class="archive-kicker">JOIN EXISTING CASE</p>
+          <h2>加入一间已经亮灯的房间</h2>
+          <label class="text-field"><span>一次性邀请码</span><input id="inviteCode" maxlength="16" placeholder="例如 A7K4-M2P9" autocomplete="off"></label>
+          <p class="form-note">Relay 尚未部署时，邀请码入口只验证格式，不会伪造联机成功。</p>
+          <button class="button button--primary" type="submit">验证邀请码</button>
+        </form>
+
+        <div class="plan-ghost" aria-hidden="true">
+          <svg viewBox="0 0 760 420" role="presentation">
+            <path d="M42 60h270v112h126V42h274v314H493v-92H309v112H42z"/>
+            <path d="M312 60v112M438 42v222M309 264v112M493 264v92M42 172h270M438 142h274"/>
+            <circle cx="376" cy="216" r="18"/>
+          </svg>
+        </div>
+      </section>
+
+      <section class="case-room" id="roomView" hidden>
+        <header class="case-room__header">
+          <div>
+            <button class="back-link" id="backHome" type="button">← 档案柜</button>
+            <p class="archive-kicker">ACTIVE CASE / <span id="caseId"></span></p>
+            <h1 id="caseTitle">尚未命名的现场</h1>
+          </div>
+          <div class="case-stamps"><span class="stamp stamp--world" id="roomWorld"></span><span class="stamp stamp--tone" id="roomTone"></span></div>
+        </header>
+
+        <nav class="mobile-tabs" aria-label="密室页面">
+          <button class="active" data-panel="scene" type="button">现场</button>
+          <button data-panel="evidence" type="button">线索</button>
+          <button data-panel="team" type="button">同伴</button>
+        </nav>
+
+        <div class="case-grid">
+          <aside class="team-panel panel" data-mobile-panel="team">
+            <div class="panel__heading"><span>在场者</span><small id="seatCount">1 / 2</small></div>
+            <div class="seat-list" id="seatList"></div>
+            <div class="invite-card">
+              <span>一次性入场券</span>
+              <strong id="roomInvite">LOCAL-DEMO</strong>
+              <button id="copyInvite" type="button">复制</button>
+            </div>
+            <div class="turn-card">
+              <span>当前行动</span>
+              <strong id="turnOwner">等待所有人准备</strong>
+              <small>动作由裁判逐一确认；交谈不抢占行动回合。</small>
+            </div>
+          </aside>
+
+          <section class="scene-panel panel mobile-active" data-mobile-panel="scene">
+            <div class="room-plan" id="roomPlan" aria-label="逐步显现的房间平面图">
+              <svg viewBox="0 0 600 410" role="img" aria-labelledby="planTitle">
+                <title id="planTitle">当前已发现的房间结构</title>
+                <g class="plan-grid"><path d="M30 30H570M30 80H570M30 130H570M30 180H570M30 230H570M30 280H570M30 330H570M30 380H570M50 20V390M100 20V390M150 20V390M200 20V390M250 20V390M300 20V390M350 20V390M400 20V390M450 20V390M500 20V390M550 20V390"/></g>
+                <g class="plan-lines"><path d="M95 76h286v104h126v154H252v-74H95z"/><path d="M381 76v184M252 180v154"/><path class="plan-door" d="M252 232q30 0 30 28"/></g>
+                <g class="plan-labels"><text x="118" y="126">入口室</text><text x="410" y="132">未确认</text><text x="304" y="304">封存区</text></g>
+                <circle class="plan-position" cx="150" cy="210" r="9"/>
+              </svg>
+              <div class="plan-caption"><span>已绘制 <b id="mapProgress">18%</b></span><span>现场会随探索显影</span></div>
+            </div>
+
+            <article class="scene-copy">
+              <span class="scene-copy__time">第 <b id="roundNumber">0</b> 轮 · 入口室</span>
+              <h2>灯刚刚亮起</h2>
+              <p id="sceneDescription">档案已经建立，但真正的房间要等所有席位到齐后才会打开。此刻只有一张未完成的平面图，以及各自不同的视线。</p>
+            </article>
+
+            <div class="action-desk">
+              <label><span>你想做什么</span><textarea id="actionInput" rows="2" placeholder="例如：查看停摆的钟"></textarea></label>
+              <div>
+                <button class="button button--quiet" id="speakAction" type="button">告诉同伴</button>
+                <button class="button button--primary" id="observeAction" type="button">观察现场</button>
+              </div>
+            </div>
+
+            <div class="event-stream" id="eventStream" aria-live="polite"></div>
+          </section>
+
+          <aside class="evidence-panel panel" data-mobile-panel="evidence">
+            <div class="panel__heading"><span>证物与线索</span><small id="clueCount">0 件</small></div>
+            <div class="evidence-list" id="evidenceList">
+              <div class="empty-evidence"><i></i><p>先观察房间。只有真正发现的线索才会出现在这里。</p></div>
+            </div>
+            <details class="archive-facts">
+              <summary>存档事实</summary>
+              <dl><div><dt>状态版本</dt><dd id="stateVersion">1</dd></div><div><dt>事件游标</dt><dd id="eventCursor">1</dd></div><div><dt>保存位置</dt><dd>本机演示</dd></div></dl>
+            </details>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>© 2026 Yussica1026 · Atherloom Project</span>
+      <span>专有软件 · 不开源 · 禁止商用</span>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="web/app.js"></script>
+</body>
+</html>

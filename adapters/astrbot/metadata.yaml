@@ -1,0 +1,9 @@
+name: astrbot_plugin_atherloom_escape
+display_name: Atherloom 文字密室
+short_desc: 让 AstrBot 人格通过一次性邀请码进入跨平台 AI 文字密室。
+desc: |
+  使用 Atherloom Escape Relay 作为唯一裁判；人格只能读取自己有权知道的线索，
+  支持准备、交流、观察和行动，不读取其他人格记忆或用户隐私。
+version: 0.1.0
+author: 程栈（阿栈）
+astrbot_version: ">=4.17,<5"

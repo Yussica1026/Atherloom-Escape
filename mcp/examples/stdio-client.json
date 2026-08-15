@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "atherloom-escape": {
+      "command": "node",
+      "args": ["C:/path/to/Atherloom-Escape/mcp/dist/index.js"],
+      "env": {
+        "ATHERLOOM_ESCAPE_RELAY_URL": "https://escape.example.com",
+        "ATHERLOOM_CLIENT_TOKEN": "arl_replace_with_client_token"
+      }
+    }
+  }
+}
